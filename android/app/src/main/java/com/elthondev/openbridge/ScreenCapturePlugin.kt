@@ -22,7 +22,7 @@ import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import java.io.ByteArrayOutputStream
 
-@CapacitorPlugin
+@CapacitorPlugin(name = "ScreenCapture")
 class ScreenCapturePlugin : Plugin() {
 
     private var projectionManager: MediaProjectionManager? = null
