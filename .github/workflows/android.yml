@@ -3,51 +3,43 @@ name: Build Android APK
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 jobs:
-  build:
+  apk:
+    name: Build Flutter APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Build web app
-        run: npm run build
-
-      - name: Set up JDK 21
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: "17"
 
-      - name: Sync Capacitor assets
-        run: |
-          npx cap sync android
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
-      - name: Build APK
+      - name: Scaffold Android platform
         run: |
-          echo "sdk.dir=/usr/local/lib/android/sdk" > android/local.properties
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleRelease
+          flutter config --no-analytics
+          flutter create . --platforms=android --org com.elthondev --project-name openbridge
+
+      - name: Apply OpenBridge native code
+        run: |
+          cp android-override/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+          cp android-override/MainActivity.kt android/app/src/main/kotlin/com/elthondev/openbridge/MainActivity.kt
+          cp android-override/ScreenCaptureChannel.kt android/app/src/main/kotlin/com/elthondev/openbridge/ScreenCaptureChannel.kt
+          cp android-override/ProjectionService.kt android/app/src/main/kotlin/com/elthondev/openbridge/ProjectionService.kt
+
+      - name: Build release APK
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: OpenBridge-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
-
-      - name: Upload debug APK (fallback)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: OpenBridge-APK-debug
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: build/app/outputs/flutter-apk/app-release.apk

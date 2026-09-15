@@ -1,20 +1,24 @@
-node_modules
-dist
-dist-ssr
-*.local
-server/node_modules
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+pubspec.lock
 
-logs
-*.log
-npm-debug.log*
+# Node (relay + plugin)
+server/node_modules/
+plugin/node_modules/
+.bridge-frames/
 
-.vscode
-!.vscode/extensions.json
-.idea
+# IDE / OS
+.idea/
+*.iml
+.vscode/
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-.bridge-frames
+
+# Android keystores
+**/*.keystore
+**/*.jks
+
+# Local
+*.log
