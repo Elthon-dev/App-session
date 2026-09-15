@@ -73,17 +73,19 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
               if (latest?.id) sessionID = latest.id
             } catch {}
             if (!sessionID) {
-              const created = await client.session.create({ directory: process.cwd() })
+              const created = await client.session.create({
+                query: { directory: process.cwd() },
+              })
               sessionID = created?.data?.id
               if (!sessionID) throw new Error('Could not create a session')
             }
             currentSessionID = sessionID
             lastForwarded = null
             const res: any = await client.session.prompt({
-              sessionID,
-              parts: [{ type: 'text', text }],
+              path: { id: sessionID },
+              body: { parts: [{ type: 'text', text }] },
             })
-            const parts = res?.data?.info?.parts ?? res?.data?.parts ?? []
+            const parts = res?.data?.info?.parts ?? res?.data?.parts ?? res?.data ?? []
             for (const p of parts) {
               if (p?.type === 'text' && p.text) forward(p.text)
             }
