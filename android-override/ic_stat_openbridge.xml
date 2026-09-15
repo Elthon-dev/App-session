@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Monochrome ring used as the status-bar small icon. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,20a34,34 0 1,0 0,68a34,34 0 1,0 0,-68zM54,32a22,22 0 1,1 0,44a22,22 0 1,1 0,-44z" />
+</vector>

@@ -24,14 +24,24 @@ class ProjectionService : Service() {
         val notification = buildNotification()
 
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
+            try {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            } catch (_: Exception) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
         } else {
             @Suppress("DEPRECATION")
-            startForeground(NOTIFICATION_ID, notification)
+            try {
+                startForeground(NOTIFICATION_ID, notification)
+            } catch (_: Exception) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
         // Capture (re)sets up its own thumbnail; we only hold the token.
@@ -67,7 +77,7 @@ class ProjectionService : Service() {
         return builder
             .setContentTitle("OpenBridge")
             .setContentText("Sharing your screen with Opencode")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_openbridge)
             .setContentIntent(launch)
             .setOngoing(true)
             .build()
