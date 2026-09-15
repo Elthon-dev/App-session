@@ -1,0 +1,18 @@
+{
+  "name": "OpenBridge",
+  "short_name": "OpenBridge",
+  "description": "Phone bridge for Opencode",
+  "start_url": "/App-session/",
+  "display": "standalone",
+  "background_color": "#0a0a0b",
+  "theme_color": "#0a0a0b",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/App-session/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
