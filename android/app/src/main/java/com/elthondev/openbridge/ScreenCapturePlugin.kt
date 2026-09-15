@@ -49,8 +49,8 @@ class ScreenCapturePlugin : Plugin() {
             call.resolve()
             return
         }
-        width = call.getInt("width", 720)
-        height = call.getInt("height", 1280)
+        width = call.getInt("width", 720) ?: 720
+        height = call.getInt("height", 1280) ?: 1280
         density = context?.resources?.displayMetrics?.densityDpi ?: 160
         pendingCall = call
 
@@ -126,7 +126,7 @@ class ScreenCapturePlugin : Plugin() {
             call.reject("No frame available yet")
             return
         }
-        val quality = call.getInt("quality", 40)
+        val quality = call.getInt("quality", 40) ?: 40
         val output = ByteArrayOutputStream()
         bmp.compress(Bitmap.CompressFormat.JPEG, quality, output)
         val encoded = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
