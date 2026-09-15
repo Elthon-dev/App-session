@@ -30,6 +30,11 @@ export function useScreenCapture(onFrame) {
     if (streamRef.current) return
     setError(null)
     try {
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        setError('Screen capture is not supported in this webview. Open the OpenBridge PWA in Chrome/Safari to share your screen, or keep using chat here.')
+        setStreaming(false)
+        return
+      }
       const ms = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: { ideal: cfg.fps }, width: { ideal: cfg.width } },
         audio: false,

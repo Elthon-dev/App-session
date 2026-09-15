@@ -30,7 +30,7 @@ jobs:
 
       - name: Sync Capacitor assets
         run: |
-          npx cap copy android
+          npx cap sync android
 
       - name: Build APK
         run: |
