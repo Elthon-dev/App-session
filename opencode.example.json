@@ -1,0 +1,13 @@
+{
+  "plugin": [
+    [
+      "./plugin/phone-bridge-plugin.ts",
+      {
+        "env": {
+          "BRIDGE_URL": "ws://127.0.0.1:8765",
+          "BRIDGE_TOKEN": "dev-secret-change-me"
+        }
+      }
+    ]
+  ]
+}
