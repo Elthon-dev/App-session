@@ -60,43 +60,56 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final messages = widget.relay.messages;
 
-    if (messages.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.forum_outlined, size: 34, color: Nord.muted),
-            const SizedBox(height: 10),
-            const Text(
-              'Session ready',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Nord.text2),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Ask anything, or share your screen for hands-on help.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12.5, color: Nord.muted),
-            ),
-          ],
-        ),
-      );
-    }
-
     return Column(
       children: [
         Expanded(
-          child: ListView.builder(
-            controller: _scroll,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            itemCount: messages.length,
-            itemBuilder: (context, i) {
-              final m = messages[i];
-              return _Bubble(message: m);
-            },
-          ),
+          child: messages.isEmpty ? _EmptyState() : _MessageList(relay: widget.relay, scroll: _scroll),
         ),
         _Composer(controller: _input, focus: _inputFocus, onSend: _send),
       ],
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.forum_outlined, size: 34, color: Nord.muted),
+          const SizedBox(height: 10),
+          const Text(
+            'Session ready',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Nord.text2),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Ask anything, or share your screen for hands-on help.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12.5, color: Nord.muted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MessageList extends StatelessWidget {
+  const _MessageList({required this.relay, required this.scroll});
+
+  final RelayClient relay;
+  final ScrollController scroll;
+
+  @override
+  Widget build(BuildContext context) {
+    final messages = relay.messages;
+    return ListView.builder(
+      controller: scroll,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      itemCount: messages.length,
+      itemBuilder: (context, i) => _Bubble(message: messages[i]),
     );
   }
 }
