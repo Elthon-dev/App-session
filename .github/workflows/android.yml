@@ -28,15 +28,13 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Sync Capacitor assets
         run: |
           npx cap copy android
 
       - name: Build APK
         run: |
+          echo "sdk.dir=/usr/local/lib/android/sdk" > android/local.properties
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease
