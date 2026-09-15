@@ -59,13 +59,25 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
           const text = String(data.text || '')
           console.log(`[openbridge] phone: ${text.slice(0, 120)}`)
           try {
-            let sessionID = currentSessionID
+            // Deliver into the most recently active session (the one the user
+            // is actually using), not whatever got created last.
+            let sessionID: string | null = null
+            try {
+              const list: any = await client.session.list()
+              const latest = (list?.data ?? [])
+                .sort(
+                  (a: any, b: any) =>
+                    new Date(b.time?.updated ?? b.time?.created ?? 0).getTime() -
+                    new Date(a.time?.updated ?? a.time?.created ?? 0).getTime()
+                )[0]
+              if (latest?.id) sessionID = latest.id
+            } catch {}
             if (!sessionID) {
               const created = await client.session.create({ directory: process.cwd() })
               sessionID = created?.data?.id
               if (!sessionID) throw new Error('Could not create a session')
-              currentSessionID = sessionID
             }
+            currentSessionID = sessionID
             lastForwarded = null
             const res: any = await client.session.prompt({
               sessionID,
