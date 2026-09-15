@@ -100,31 +100,36 @@ class ScreenCaptureChannel(
             return
         }
 
-        // Android 14+ requires a mediaProjection foreground service before
-        // getMediaProjection is allowed to succeed.
-        if (Build.VERSION.SDK_INT >= 29) {
+        // Hand off to the foreground service: it creates the MediaProjection
+        // AFTER startForeground(), which Android 14+ requires. We configure the
+        // capture callback here so the projection arrives thread-safely.
+        ProjectionService.setOnProjectionReady { projection ->
+            if (projection == null) {
+                pending?.error("failed", "Could not acquire media projection", null)
+                return@setOnProjectionReady
+            }
             try {
-                val svc = Intent(activity, ProjectionService::class.java)
-                if (Build.VERSION.SDK_INT >= 26) activity.startForegroundService(svc)
-                else activity.startService(svc)
-            } catch (_: Exception) {}
+                mediaProjection = projection
+                setupProjection(projection)
+                started = true
+                pending?.success(true)
+            } catch (e: Exception) {
+                stop()
+                pending?.error("failed", "Failed to start screen capture", null)
+            }
         }
 
-        val pm = projectionManager
-        if (pm == null) {
-            pending?.error("unavailable", "MediaProjection is not available on this device", null)
-            return
+        val svc = Intent(activity, ProjectionService::class.java).apply {
+            putExtra("extra_code", resultCode)
+            putExtra("extra_data", data)
         }
-        val projection = pm.getMediaProjection(resultCode, data)
-        if (projection == null) {
-            pending?.error("failed", "Could not acquire media projection", null)
-            return
+        try {
+            if (Build.VERSION.SDK_INT >= 26) activity.startForegroundService(svc)
+            else activity.startService(svc)
+        } catch (_: Exception) {
+            ProjectionService.clearCallback()
+            pending?.error("failed", "Could not start capture service", null)
         }
-
-        mediaProjection = projection
-        setupProjection(projection)
-        started = true
-        pending?.success(true)
     }
 
     @android.annotation.SuppressLint("WrongConstant")
@@ -189,11 +194,6 @@ class ScreenCaptureChannel(
                 channel.invokeMethod("captureStopped", null)
             }
         }, loop)
-
-        // Tell the foreground service it can tear itself down now.
-        try {
-            activity.stopService(Intent(activity, ProjectionService::class.java))
-        } catch (_: Exception) {}
     }
 
     private fun captureFrame(result: MethodChannel.Result) {
@@ -242,5 +242,8 @@ class ScreenCaptureChannel(
         } catch (_: Exception) {}
         captureThread = null
         captureHandler = null
+        try {
+            activity.stopService(Intent(activity, ProjectionService::class.java))
+        } catch (_: Exception) {}
     }
 }

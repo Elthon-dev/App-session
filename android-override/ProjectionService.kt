@@ -7,13 +7,19 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 
 /**
- * Foreground service with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION, required by
- * Android 14+ before MediaProjection can be used. It runs briefly while the
- * capture setup happens and then stops itself.
+ * Foreground service with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION.
+ *
+ * Android 10+ requires a foreground service of this type to be ACTIVE before
+ * MediaProjectionManager.getMediaProjection() may be called, and Android 14+
+ * throws a SecurityException otherwise. Creating the projection here, after
+ * startForeground(), guarantees correct ordering. The service stays alive for
+ * the duration of the capture and is stopped by the capture channel.
  */
 class ProjectionService : Service() {
 
@@ -21,32 +27,53 @@ class ProjectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureNotificationChannel()
-        val notification = buildNotification()
+        if (!startForegroundSafely()) return START_NOT_STICKY
 
-        if (Build.VERSION.SDK_INT >= 29) {
-            try {
+        val code = intent?.getIntExtra(EXTRA_CODE, -1) ?: -1
+        val data = extractData(intent)
+        if (code != -1 && data != null) {
+            val pm =
+                getSystemService(Service.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+            val projection: MediaProjection? = try {
+                pm?.getMediaProjection(code, data)
+            } catch (_: Exception) {
+                null
+            }
+            val cb = callback
+            callback = null
+            if (cb != null) cb(projection)
+        }
+
+        return START_STICKY
+    }
+
+    private fun startForegroundSafely(): Boolean {
+        val notification = buildNotification()
+        return try {
+            if (Build.VERSION.SDK_INT >= 29) {
                 startForeground(
                     NOTIFICATION_ID,
                     notification,
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
                 )
-            } catch (_: Exception) {
-                stopSelf()
-                return START_NOT_STICKY
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            try {
+            } else {
+                @Suppress("DEPRECATION")
                 startForeground(NOTIFICATION_ID, notification)
-            } catch (_: Exception) {
-                stopSelf()
-                return START_NOT_STICKY
             }
+            true
+        } catch (_: Exception) {
+            false
         }
+    }
 
-        // Capture (re)sets up its own thumbnail; we only hold the token.
-        stopSelf()
-        return START_NOT_STICKY
+    @Suppress("DEPRECATION")
+    private fun extractData(intent: Intent?): Intent? {
+        if (intent == null) return null
+        return if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(EXTRA_DATA, Intent::class.java)
+        } else {
+            intent.getParcelableExtra(EXTRA_DATA)
+        }
     }
 
     private fun ensureNotificationChannel() {
@@ -86,5 +113,19 @@ class ProjectionService : Service() {
     companion object {
         private const val CHANNEL_ID = "openbridge-capture"
         private const val NOTIFICATION_ID = 7007
+        private const val EXTRA_CODE = "extra_code"
+        private const val EXTRA_DATA = "extra_data"
+
+        @Volatile
+        private var callback: ((MediaProjection?) -> Unit)? = null
+
+        /** Set by the capture channel before starting this service. */
+        fun setOnProjectionReady(cb: (MediaProjection?) -> Unit) {
+            callback = cb
+        }
+
+        fun clearCallback() {
+            callback = null
+        }
     }
 }
