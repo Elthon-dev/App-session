@@ -136,7 +136,7 @@ class _Bubble extends StatelessWidget {
             bottomLeft: Radius.circular(isUser ? 15 : 4),
             bottomRight: Radius.circular(isUser ? 4 : 15),
           ),
-          border: isUser ? null : const Border.side(color: Nord.border, width: 0.5),
+          border: isUser ? null : const Border.all(color: Nord.border, width: 0.5),
         ),
         child: Text(
           msg.text,
