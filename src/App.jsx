@@ -12,7 +12,7 @@ export default function App() {
   }
 
   return (
-    <div className="h-full max-w-md mx-auto flex flex-col relative">
+    <div className="app-shell relative">
       <StatusBar
         state={s.connectionState}
         sessionId={s.sessionId}

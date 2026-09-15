@@ -1,17 +1,39 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0a0a0b;
-  --surface: #141416;
-  --surface-hover: #1c1c1f;
-  --border: #27272a;
-  --border-focus: #3f3f46;
-  --text: #fafafa;
-  --text-muted: #71717a;
-  --accent: #22c55e;
-  --accent-dim: #166534;
-  --danger: #ef4444;
-  --danger-dim: #7f1d1d;
+  --nord0: #2e3440;
+  --nord1: #3b4252;
+  --nord2: #434c5e;
+  --nord3: #4c566a;
+  --nord4: #d8dee9;
+  --nord5: #e5e9f0;
+  --nord6: #eceff4;
+  --nord7: #8fbcbb;
+  --nord8: #88c0d0;
+  --nord9: #81a1c1;
+  --nord10: #5e81ac;
+  --nord11: #bf616a;
+  --nord12: #d08770;
+  --nord13: #ebcb8b;
+  --nord14: #a3be8c;
+  --nord15: #b48ead;
+
+  --bg: var(--nord0);
+  --surface: var(--nord1);
+  --surface-hover: var(--nord2);
+  --border: var(--nord2);
+  --border-focus: var(--nord3);
+  --text: var(--nord5);
+  --text-muted: var(--nord3);
+  --accent: var(--nord14);
+  --accent-dim: #617b53;
+  --accent-contrast: var(--nord0);
+  --danger: var(--nord11);
+
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
 }
 
 * {
@@ -32,18 +54,40 @@ html, body, #root {
 
 input, textarea {
   font-family: inherit;
+  color: var(--text);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--nord3);
+}
+
+.app-shell {
+  height: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.header {
+  padding-top: calc(0.6rem + var(--sat));
+  padding-left: calc(1rem + var(--sal));
+  padding-right: calc(1rem + var(--sar));
+}
+
+.footer-pad {
+  padding-bottom: calc(0.7rem + var(--sab));
 }
 
 ::-webkit-scrollbar {
   width: 4px;
 }
-
 ::-webkit-scrollbar-track {
   background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: var(--border);
+  background: var(--nord3);
   border-radius: 4px;
 }
 
@@ -57,17 +101,8 @@ input, textarea {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@keyframes slide-up {
-  from { opacity: 0; transform: translateY(100%); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 .animate-fade-in {
   animation: fade-in 0.3s ease-out;
-}
-
-.animate-slide-up {
-  animation: slide-up 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .animate-pulse-dot {

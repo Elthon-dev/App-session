@@ -4,8 +4,8 @@
   "description": "Phone bridge for Opencode",
   "start_url": "/App-session/",
   "display": "standalone",
-  "background_color": "#0a0a0b",
-  "theme_color": "#0a0a0b",
+  "background_color": "#2e3440",
+  "theme_color": "#2e3440",
   "orientation": "portrait",
   "icons": [
     {
