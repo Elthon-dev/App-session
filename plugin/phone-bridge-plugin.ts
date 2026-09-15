@@ -14,6 +14,16 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
   let latestFramePath = null as string | null
   let reconnectTimer = null as any
 
+  let lastForwarded: string | null = null
+
+  const forward = (t: string) => {
+    const clean = String(t || '')
+    if (!clean.trim() || !phone) return
+    if (clean === lastForwarded) return
+    lastForwarded = clean
+    send({ type: 'chat', text: clean })
+  }
+
   const framesDir = `${process.cwd()}/.bridge-frames`
   if (!existsSync(framesDir)) mkdirSync(framesDir, { recursive: true })
 
@@ -51,18 +61,20 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
           try {
             let sessionID = currentSessionID
             if (!sessionID) {
-              const list = await client.session.list()
-              const s = list.data?.sort(
-                (a: any, b: any) => new Date(b.time?.created!).getTime() - new Date(a.time?.created!).getTime()
-              )[0]
-              sessionID = s?.id
-            }
-            if (!sessionID) {
               const created = await client.session.create({ directory: process.cwd() })
-              sessionID = created.data?.id
+              sessionID = created?.data?.id
+              if (!sessionID) throw new Error('Could not create a session')
+              currentSessionID = sessionID
             }
-            currentSessionID = sessionID
-            await client.session.prompt(sessionID, { text })
+            lastForwarded = null
+            const res: any = await client.session.prompt({
+              sessionID,
+              parts: [{ type: 'text', text }],
+            })
+            const parts = res?.data?.info?.parts ?? res?.data?.parts ?? []
+            for (const p of parts) {
+              if (p?.type === 'text' && p.text) forward(p.text)
+            }
           } catch (err: any) {
             send({ type: 'chat', text: `⚠️ Could not reach Opencode: ${err?.message}` })
           }
@@ -192,12 +204,14 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
         case 'message.part.updated': {
           const part = e.properties?.part
           if (part?.type === 'text' && typeof part.text === 'string' && part.text.trim()) {
-            send({ type: 'chat', text: part.text })
+            forward(part.text)
           }
           break
         }
         case 'session.idle': {
-          send({ type: 'chat', text: 'Done.' })
+          const alreadySent = lastForwarded != null
+          lastForwarded = null
+          if (!alreadySent) send({ type: 'chat', text: 'Done.' })
           break
         }
       }

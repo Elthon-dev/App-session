@@ -192,6 +192,16 @@ class RelayClient extends ChangeNotifier {
     sendRaw({'type': 'chat', 'text': text});
   }
 
+  void addSystem(String text) {
+    if (text.trim().isEmpty) return;
+    _push(ChatRole.system, text);
+  }
+
+  void clearMessages() {
+    messages.clear();
+    notifyListeners();
+  }
+
   void sendFrame(String dataUrl) {
     sendRaw({'type': 'screen', 'image': dataUrl});
   }

@@ -128,7 +128,10 @@ class _HomeScreenState extends State<HomeScreen> {
             child: IndexedStack(
               index: _tab,
               children: [
-                ChatScreen(relay: relay),
+                ChatScreen(
+                  relay: relay,
+                  onShare: () => setState(() => _tab = 1),
+                ),
                 ScreenShareScreen(relay: relay, capture: _capture),
               ],
             ),
