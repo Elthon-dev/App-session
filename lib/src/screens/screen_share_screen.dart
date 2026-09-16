@@ -309,7 +309,6 @@ class _ControlStatusBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ready = capture.controlReady;
-    final available = capture.shizukuAvailable;
     final bound = capture.shizukuBound;
     final stuck = capture.shizukuStuck;
     final attempts = capture.shizukuAttempts;
