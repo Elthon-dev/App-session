@@ -169,16 +169,6 @@ void _handle(dynamic raw) {
   }
 
   void Function(String action, double x, double y, Map<String, dynamic> raw)? onControl;
-          break;
-        case 'ping':
-          sendRaw({'type': 'pong'});
-          break;
-        case 'control':
-          _handleControl(j);
-          break;
-      }
-    } catch (_) {}
-  }
 
   void _onClose() {
     _channel = null;
