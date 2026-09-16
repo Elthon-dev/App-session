@@ -177,6 +177,15 @@ class ScreenCaptureChannel(
             }
         }, loop)
 
+        // Register the callback BEFORE creating the virtual display: newer
+        // Android versions require it for MediaProjection resource management.
+        projection.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                stop()
+                channel.invokeMethod("captureStopped", null)
+            }
+        }, loop)
+
         virtualDisplay = projection.createVirtualDisplay(
             "OpenBridgeCapture",
             dispW,
@@ -187,13 +196,6 @@ class ScreenCaptureChannel(
             null,
             loop
         )
-
-        projection.registerCallback(object : MediaProjection.Callback() {
-            override fun onStop() {
-                stop()
-                channel.invokeMethod("captureStopped", null)
-            }
-        }, loop)
     }
 
     private fun captureFrame(result: MethodChannel.Result) {
