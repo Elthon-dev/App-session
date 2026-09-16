@@ -30,7 +30,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _capture.bind();
-    _capture.refreshShizuku();
+    _capture.refreshPermissions();
     _sessions.addListener(_onSessionsChanged);
     _sessions.load();
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkBatteryBypass());

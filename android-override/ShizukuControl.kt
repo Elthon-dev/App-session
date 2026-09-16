@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
+import android.os.Parcel
 import rikka.shizuku.Shizuku
 
 /**
@@ -20,12 +21,12 @@ object ShizukuControl {
     const val REQUEST_CODE = 4242
     const val TAG = "OpenBridgeShizuku"
 
-    @Volatile private var shell: IShellCommand? = null
+    @Volatile private var shell: IBinder? = null
     private var args: Shizuku.UserServiceArgs? = null
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-            shell = IShellCommand.Stub.asInterface(binder)
+            shell = binder
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
@@ -80,9 +81,28 @@ object ShizukuControl {
     /** Fire-and-forget execution of a shell command via the shell process. */
     fun execute(context: Context, cmd: String) {
         if (!canControl()) return
-        if (shell == null) bind(context)
-        try {
-            shell?.exec(cmd)
-        } catch (_: Throwable) {}
+        val shellBinder = shell
+        if (shellBinder == null) {
+            bind(context)
+            return
+        }
+        Thread {
+            var data: Parcel? = null
+            var reply: Parcel? = null
+            try {
+                data = Parcel.obtain()
+                reply = Parcel.obtain()
+                data.writeInterfaceToken(ShellService.DESCRIPTOR)
+                data.writeString(cmd)
+                shellBinder.transact(ShellService.TRANSACTION_EXEC, data, reply, 0)
+                reply.readException()
+            } catch (_: Throwable) {
+            } finally {
+                try {
+                    reply?.recycle()
+                    data?.recycle()
+                } catch (_: Throwable) {}
+            }
+        }.start()
     }
 }

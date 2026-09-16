@@ -37,6 +37,7 @@ class ScreenCaptureChannel(
     companion object {
         const val CHANNEL = "openbridge/screen"
         const val REQUEST_CAPTURE = 92451
+        const val REQUEST_NOTIFICATION_PERMISSION = 92452
     }
 
     private val channel = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
@@ -106,6 +107,38 @@ class ScreenCaptureChannel(
         } catch (_: Throwable) {}
     }
 
+    private fun notificationGranted(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < 33) return true
+        return try {
+            activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    private fun batteryExempt(): Boolean {
+        return try {
+            val pm = activity.getSystemService(Service.POWER_SERVICE) as? PowerManager
+            pm?.isIgnoringBatteryOptimizations(activity.packageName) ?: false
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    /** Forwarded from MainActivity for runtime-permission callbacks. */
+    fun onRequestPermissionsResult(requestCode: Int, grantResults: IntArray) {
+        if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
+            notifyPermissionsChanged()
+        }
+    }
+
+    private fun notifyPermissionsChanged() {
+        try {
+            channel.invokeMethod("permissionChanged", null)
+        } catch (_: Throwable) {}
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "startCapture" -> {
@@ -143,6 +176,27 @@ class ScreenCaptureChannel(
             }
             "requestShizukuPermission" -> {
                 result.success(ShizukuControl.requestPermission())
+            }
+            "permissionStatus" -> {
+                result.success(
+                    mapOf(
+                        "notifications" to notificationGranted(),
+                        "battery" to batteryExempt(),
+                        "shizukuAvailable" to ShizukuControl.available(),
+                        "shizukuGranted" to ShizukuControl.permissionGranted(),
+                    )
+                )
+            }
+            "requestNotificationPermission" -> {
+                if (!notificationGranted() && android.os.Build.VERSION.SDK_INT >= 33) {
+                    try {
+                        activity.requestPermissions(
+                            arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+                            REQUEST_NOTIFICATION_PERMISSION
+                        )
+                    } catch (_: Exception) {}
+                }
+                result.success(true)
             }
             "executeControl" -> {
                 val action = call.argument<String>("action") ?: ""

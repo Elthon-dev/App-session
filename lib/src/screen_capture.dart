@@ -18,6 +18,12 @@ class ScreenCaptureService extends ChangeNotifier {
   /// OpenBridge is authorized inside the Shizuku app.
   bool shizukuGranted = false;
 
+  /// Notification permission granted (always true before Android 13).
+  bool notificationGranted = true;
+
+  /// App is exempt from battery optimizations.
+  bool batteryExempt = false;
+
   /// True when shell-based control commands will actually work.
   bool get controlReady => shizukuAvailable && shizukuGranted;
 
@@ -34,7 +40,8 @@ class ScreenCaptureService extends ChangeNotifier {
         case 'captureStopped':
           await stop();
         case 'shizukuStatusChanged':
-          await refreshShizuku();
+        case 'permissionChanged':
+          await refreshPermissions();
       }
       return null;
     });
@@ -50,10 +57,32 @@ class ScreenCaptureService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Refresh all permission-related state in one native round-trip.
+  Future<void> refreshPermissions() async {
+    try {
+      final m = await _channel.invokeMethod<Map<Object?, Object?>>('permissionStatus');
+      notificationGranted = m?['notifications'] == true;
+      batteryExempt = m?['battery'] == true;
+      shizukuAvailable = m?['shizukuAvailable'] == true;
+      shizukuGranted = m?['shizukuGranted'] == true;
+      notifyListeners();
+    } catch (_) {}
+  }
+
   /// Ask the user to authorize OpenBridge inside the Shizuku app.
   Future<bool> requestShizukuPermission() async {
     try {
       final ok = await _channel.invokeMethod<bool>('requestShizukuPermission');
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Ask for notification permission (Android 13+ shows the system dialog).
+  Future<bool> requestNotificationPermission() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('requestNotificationPermission');
       return ok == true;
     } catch (_) {
       return false;

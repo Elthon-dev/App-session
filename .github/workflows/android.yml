@@ -31,14 +31,12 @@ jobs:
       - name: Apply OpenBridge native code
         run: |
           mkdir -p android/app/src/main/res/drawable android/app/src/main/kotlin/com/elthondev/openbridge
-          mkdir -p android/app/src/main/aidl/com/elthondev/openbridge
           cp android-override/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
           cp android-override/MainActivity.kt android/app/src/main/kotlin/com/elthondev/openbridge/MainActivity.kt
           cp android-override/ScreenCaptureChannel.kt android/app/src/main/kotlin/com/elthondev/openbridge/ScreenCaptureChannel.kt
           cp android-override/ProjectionService.kt android/app/src/main/kotlin/com/elthondev/openbridge/ProjectionService.kt
           cp android-override/ShizukuControl.kt android/app/src/main/kotlin/com/elthondev/openbridge/ShizukuControl.kt
           cp android-override/ShellService.kt android/app/src/main/kotlin/com/elthondev/openbridge/ShellService.kt
-          cp android-override/IShellCommand.aidl android/app/src/main/aidl/com/elthondev/openbridge/IShellCommand.aidl
           cp android-override/ic_stat_openbridge.xml android/app/src/main/res/drawable/ic_stat_openbridge.xml
 
       - name: Inject Shizuku dependencies

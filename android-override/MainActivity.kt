@@ -20,4 +20,12 @@ class MainActivity : FlutterActivity() {
         }
         super.onActivityResult(requestCode, resultCode, data)
     }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        if (requestCode == ScreenCaptureChannel.REQUEST_NOTIFICATION_PERMISSION) {
+            screenCapture?.onRequestPermissionsResult(requestCode, grantResults)
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
 }

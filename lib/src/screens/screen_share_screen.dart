@@ -83,7 +83,10 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
 
     return Column(
       children: [
-        _ControlStatusBanner(capture: capture),
+        _ControlStatusBanner(
+          capture: capture,
+          onOpenPermissions: () => _openPermissions(context),
+        ),
         Expanded(
           child: capturing
               ? _Preview(
@@ -109,12 +112,179 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
       ],
     );
   }
+
+  Future<void> _openPermissions(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Nord.surface,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _PermissionsSheet(capture: widget.capture),
+    );
+    if (mounted) setState(() {});
+  }
+}
+
+class _PermissionsSheet extends StatefulWidget {
+  const _PermissionsSheet({required this.capture});
+
+  final ScreenCaptureService capture;
+
+  @override
+  State<_PermissionsSheet> createState() => _PermissionsSheetState();
+}
+
+class _PermissionsSheetState extends State<_PermissionsSheet> {
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.capture.refreshPermissions();
+  }
+
+  Future<void> _run(Future<bool> Function() action) async {
+    setState(() => _busy = true);
+    await action();
+    await widget.capture.refreshPermissions();
+    if (mounted) setState(() => _busy = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.capture;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Center(
+              child: Text(
+                'Permissions',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Nord.text1),
+              ),
+            ),
+            const SizedBox(height: 14),
+            _PermissionRow(
+              icon: Icons.notifications_none,
+              title: 'Notifications',
+              subtitle: 'Lets the screen-share status show in the notification shade.',
+              granted: c.notificationGranted,
+              actionLabel: 'Allow',
+              onAction: _busy ? null : () => _run(c.requestNotificationPermission),
+            ),
+            _PermissionRow(
+              icon: Icons.battery_saver,
+              title: 'Battery',
+              subtitle: 'Exempts OpenBridge so Android won’t kill it while sharing.',
+              granted: c.batteryExempt,
+              actionLabel: 'Exempt',
+              onAction: _busy ? null : () => _run(() async => c.requestBatteryBypass()),
+            ),
+            _PermissionRow(
+              icon: Icons.shield_outlined,
+              title: 'Shizuku',
+              subtitle: c.shizukuAvailable
+                  ? 'Enables remote tap / swipe control with shell access.'
+                  : 'Shizuku isn’t running — start it from the notification shade.',
+              granted: c.shizukuGranted,
+              actionLabel: 'Authorize',
+              onAction: _busy ? null : () => _run(c.requestShizukuPermission),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PermissionRow extends StatelessWidget {
+  const _PermissionRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.granted,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool granted;
+  final String actionLabel;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = granted ? Nord.success : Nord.muted;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Nord.bg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Nord.border),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: color.withValues(alpha: 0.12),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 20, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Nord.text1),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(fontSize: 10.5, color: Nord.muted, height: 1.35),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          FilledButton(
+            onPressed: granted ? null : onAction,
+            style: FilledButton.styleFrom(
+              backgroundColor: granted ? Nord.success : Nord.accent,
+              foregroundColor: granted ? Nord.bg.withValues(alpha: 0.9) : Nord.bg,
+              disabledBackgroundColor: Nord.success.withValues(alpha: 0.2),
+              disabledForegroundColor: Nord.bg.withValues(alpha: 0.6),
+              minimumSize: const Size(96, 36),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+            child: Text(granted ? 'Granted' : actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ControlStatusBanner extends StatelessWidget {
-  const _ControlStatusBanner({required this.capture});
+  const _ControlStatusBanner({required this.capture, required this.onOpenPermissions});
 
   final ScreenCaptureService capture;
+  final VoidCallback onOpenPermissions;
 
   @override
   Widget build(BuildContext context) {
@@ -161,6 +331,15 @@ class _ControlStatusBanner extends StatelessWidget {
                 ),
               ),
             ),
+          if (!ready) const SizedBox(width: 4),
+          InkWell(
+            onTap: onOpenPermissions,
+            borderRadius: BorderRadius.circular(8),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              child: Icon(Icons.tune, size: 16, color: Nord.muted),
+            ),
+          ),
         ],
       ),
     );
