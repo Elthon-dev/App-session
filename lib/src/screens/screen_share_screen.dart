@@ -301,7 +301,7 @@ class _ControlStatusBanner extends StatelessWidget {
       color = Nord.success;
       icon = Icons.touch_app;
       text = 'Control ready — Shizuku active';
-    } else if (stuck || err != null) {
+    } else if (stuck) {
       color = Nord.error;
       icon = Icons.error_outline;
       text = 'Control engine stuck (v$version, attempt $attempts)';
