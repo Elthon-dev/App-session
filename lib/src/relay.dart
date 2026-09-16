@@ -242,7 +242,19 @@ void _handle(dynamic raw) {
       }
     }
     notifyListeners();
+    if (models.length != _lastConfigModels || agents.length != _lastConfigAgents) {
+      _lastConfigModels = models.length;
+      _lastConfigAgents = agents.length;
+      _push(
+        ChatRole.system,
+        'Loaded ${models.length} model${models.length == 1 ? '' : 's'}, '
+        '${agents.length} agent${agents.length == 1 ? '' : 's'} from Opencode.',
+      );
+    }
   }
+
+  int _lastConfigModels = -1;
+  int _lastConfigAgents = -1;
 
   void _handleControl(Map<String, dynamic> msg) {
     final action = msg['action'] as String? ?? '';

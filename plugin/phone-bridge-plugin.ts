@@ -42,27 +42,56 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
         client.app.agents(),
         client.session.list(),
       ])
+      // /config/providers returns { providers: [...], default: {...} },
+      // /agent returns an array, /session/list returns an array — normalize all.
+      const providersData: any = providersRes?.data
+      const providers = Array.isArray(providersData)
+        ? providersData
+        : Array.isArray(providersData?.providers)
+          ? providersData.providers
+          : []
+      const agentsData: any = agentsRes?.data
+      const agentsRaw = Array.isArray(agentsData)
+        ? agentsData
+        : Array.isArray(agentsData?.agents)
+          ? agentsData.agents
+          : []
+      const sessionsData: any = sessionRes?.data
+      const sessions = Array.isArray(sessionsData)
+        ? sessionsData
+        : Array.isArray(sessionsData?.sessions)
+          ? sessionsData.sessions
+          : []
+
       const models: Array<{ providerID: string; modelID: string; name: string }> = []
-      for (const p of providersRes?.data ?? []) {
-        for (const m of Object.values(p?.models ?? {})) {
+      for (const p of providers) {
+        const pModels = p?.models && typeof p.models === 'object' ? p.models : {}
+        for (const m of Object.values(pModels)) {
           const mm = m as any
-          models.push({ providerID: p.id, modelID: mm?.id ?? String(mm?.name ?? ''), name: mm?.name || mm?.id || '' })
+          const modelID = String(mm?.id ?? '')
+          const name = String(mm?.name || mm?.id || '')
+          if (modelID) {
+            models.push({ providerID: String(p?.id ?? ''), modelID, name })
+          }
         }
       }
+      // Sort models deterministically: provider then name.
+      models.sort((a, b) => (a.providerID + a.modelID).localeCompare(b.providerID + b.modelID))
+
       const agents: Array<{ name: string; description: string; builtIn: boolean }> = []
-      for (const a of agentsRes?.data ?? []) {
-        agents.push({
-          name: a?.name ?? '',
-          description: a?.description ?? '',
-          builtIn: !!a?.builtIn,
-        })
+      for (const a of agentsRaw) {
+        if (a?.name) {
+          agents.push({ name: String(a.name), description: String(a?.description ?? ''), builtIn: !!a?.builtIn })
+        }
       }
+      agents.sort((a, b) => String(a.builtIn).localeCompare(String(b.builtIn)) || a.name.localeCompare(b.name))
+
       let current: { model: { providerID: string; modelID: string } | null; agent: string | null } = {
         model: selectedModel,
         agent: selectedAgent,
       }
       try {
-        const latest = (sessionRes?.data ?? []).sort(
+        const latest = [...sessions].sort(
           (a: any, b: any) =>
             new Date(b.time?.updated ?? b.time?.created ?? 0).getTime() -
             new Date(a.time?.updated ?? a.time?.created ?? 0).getTime()
