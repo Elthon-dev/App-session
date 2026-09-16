@@ -19,8 +19,9 @@ plugin/node_modules/
 .vscode/
 .DS_Store
 
-# Android keystores
+# Android keystores (only the .b64 snapshot is committed)
 **/*.keystore
+android/keystore/*.jks
 **/*.jks
 
 # Local

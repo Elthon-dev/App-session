@@ -69,6 +69,60 @@ jobs:
           echo "--- $APP_GRADLE tail ---"
           tail -12 "$APP_GRADLE"
 
+      - name: Restore signing keystore
+        run: |
+          base64 -d android/keystore/openbridge.jks.b64 > "$HOME/openbridge.jks"
+          echo "OPENBRIDGE_KEYSTORE=$HOME/openbridge.jks" >> "$GITHUB_ENV"
+          echo "OPENBRIDGE_STORE_PASS=ob-dev-2026" >> "$GITHUB_ENV"
+          echo "OPENBRIDGE_KEY_PASS=ob-dev-2026" >> "$GITHUB_ENV"
+          echo "OPENBRIDGE_KEY_ALIAS=openbridge" >> "$GITHUB_ENV"
+
+      - name: Inject deterministic signing config
+        run: |
+          APP_GRADLE=android/app/build.gradle.kts
+          if [ ! -f "$APP_GRADLE" ]; then APP_GRADLE=android/app/build.gradle; fi
+          echo "Signing config -> $APP_GRADLE"
+          if [[ "$APP_GRADLE" == *.kts ]]; then
+            cat >> "$APP_GRADLE" <<'EOF'
+
+android {
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("OPENBRIDGE_KEYSTORE") ?: "/tmp/missing.jks")
+            storePassword = System.getenv("OPENBRIDGE_STORE_PASS") ?: "x"
+            keyAlias = System.getenv("OPENBRIDGE_KEY_ALIAS") ?: "x"
+            keyPassword = System.getenv("OPENBRIDGE_KEY_PASS") ?: "x"
+        }
+    }
+    buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+}
+EOF
+          else
+            cat >> "$APP_GRADLE" <<'EOF'
+
+android {
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("OPENBRIDGE_KEYSTORE"))
+            storePassword System.getenv("OPENBRIDGE_STORE_PASS")
+            keyAlias System.getenv("OPENBRIDGE_KEY_ALIAS")
+            keyPassword System.getenv("OPENBRIDGE_KEY_PASS")
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+        }
+    }
+}
+EOF
+          fi
+          tail -22 "$APP_GRADLE"
+
       - name: Build release APK
         run: flutter build apk --release
 
