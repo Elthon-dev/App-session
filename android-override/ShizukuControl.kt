@@ -1,18 +1,37 @@
 package com.elthondev.openbridge
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
+import android.os.IBinder
 import rikka.shizuku.Shizuku
 
 /**
- * Runs shell-level input commands (tap / swipe / keyevent / text) with shell
- * privileges through Shizuku. When Shizuku is running and OpenBridge has been
- * authorized inside the Shizuku app, commands execute via Shizuku.newProcess().
- * Otherwise we fall back to a plain Runtime.exec() (which is normally denied
- * for a regular app process — the Dart side reports capability so the UI can
- * nudge the user to authorize in Shizuku).
+ * Provides shell-level input control (tap / swipe / keyevent / text) through
+ * Shizuku. When Shizuku is running and OpenBridge is authorized inside the
+ * Shizuku app, we bind a Shizuku "user service" (ShellService) that runs in a
+ * separate process with the shell UID and executes `input ...` on our behalf.
+ * Shizuku 13 removed the old public Shizuku.newProcess(), so bindUserService
+ * is the supported way to run commands. Without Shizuku authorization nothing
+ * is executed — the Dart side reflects capability so the UI can nudge the user.
  */
 object ShizukuControl {
     const val REQUEST_CODE = 4242
+    const val TAG = "OpenBridgeShizuku"
+
+    @Volatile private var shell: IShellCommand? = null
+    private var args: Shizuku.UserServiceArgs? = null
+
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            shell = IShellCommand.Stub.asInterface(binder)
+        }
+
+        override fun onServiceDisconnected(name: ComponentName) {
+            shell = null
+        }
+    }
 
     fun available(): Boolean = try {
         Shizuku.pingBinder()
@@ -33,25 +52,37 @@ object ShizukuControl {
         false
     }
 
-    /** True when shell commands will actually execute with elevated rights. */
+    /** True when shell commands will actually run with elevated rights. */
     fun canControl(): Boolean = available() && permissionGranted()
 
-    /** Prompt the user to authorize OpenBridge inside the Shizuku app. */
+    /** Ask the user to authorize OpenBridge inside the Shizuku app. */
     fun requestPermission(): Boolean = try {
         Shizuku.requestPermission(REQUEST_CODE)
+        true
     } catch (_: Throwable) {
         false
     }
 
-    /** Fire-and-forget execution of a shell command through the Shizuku server. */
-    fun execute(cmd: String) {
+    /** Bind the shell user-service so commands run as the shell UID. */
+    fun bind(context: Context) {
+        val a = args ?: Shizuku.UserServiceArgs(
+            ComponentName(context.packageName, ShellService::class.java.name)
+        ).daemon(false)
+            .processNameSuffix(ShellService.PROCESS_SUFFIX)
+            .tag(ShellService.TAG)
+            .version(ShellService.VERSION)
+            .also { args = it }
+        try {
+            Shizuku.bindUserService(a, connection)
+        } catch (_: Throwable) {}
+    }
+
+    /** Fire-and-forget execution of a shell command via the shell process. */
+    fun execute(context: Context, cmd: String) {
         if (!canControl()) return
-        Thread {
-            try {
-                val p = Shizuku.newProcess(arrayOf("sh", "-c", cmd), null, null)
-                p.waitFor()
-            } catch (_: Throwable) {
-            }
-        }.start()
+        if (shell == null) bind(context)
+        try {
+            shell?.exec(cmd)
+        } catch (_: Throwable) {}
     }
 }

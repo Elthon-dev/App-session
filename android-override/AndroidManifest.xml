@@ -43,6 +43,9 @@
             android:name="com.elthondev.openbridge.ProjectionService"
             android:foregroundServiceType="mediaProjection"
             android:exported="false" />
+        <service
+            android:name="com.elthondev.openbridge.ShellService"
+            android:exported="true" />
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"

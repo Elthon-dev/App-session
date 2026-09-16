@@ -3,6 +3,7 @@ package com.elthondev.openbridge
 import android.app.Activity
 import android.app.Service
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -74,13 +75,22 @@ class ScreenCaptureChannel(
     }
 
     private val binderListener = object : Shizuku.OnBinderReceivedListener, Shizuku.OnBinderDeadListener {
-        override fun onBinderReceived() = notifyShizukuStatus()
+        override fun onBinderReceived() {
+            if (ShizukuControl.canControl()) ShizukuControl.bind(activity)
+            notifyShizukuStatus()
+        }
+
         override fun onBinderDead() = notifyShizukuStatus()
     }
 
     private val permissionListener = object : Shizuku.OnRequestPermissionResultListener {
         override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
-            if (requestCode == ShizukuControl.REQUEST_CODE) notifyShizukuStatus()
+            if (requestCode == ShizukuControl.REQUEST_CODE) {
+                if (grantResult == PackageManager.PERMISSION_GRANTED && ShizukuControl.canControl()) {
+                    ShizukuControl.bind(activity)
+                }
+                notifyShizukuStatus()
+            }
         }
     }
 
@@ -160,7 +170,7 @@ class ScreenCaptureChannel(
                         return
                     }
                     if (ShizukuControl.canControl()) {
-                        ShizukuControl.execute(cmd)
+                        ShizukuControl.execute(activity, cmd)
                     } else {
                         try {
                             Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
