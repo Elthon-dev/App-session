@@ -42,8 +42,14 @@ class ScreenCaptureService extends ChangeNotifier {
   /// App is exempt from battery optimizations.
   bool batteryExempt = false;
 
-  /// True when shell-based control commands will actually work.
-  bool get controlReady => shizukuAvailable && shizukuGranted;
+  /// OpenBridge AccessibilityService is enabled (no-Shizuku control backend).
+  bool accessibilityEnabled = false;
+
+  /// True when Shizuku shell control is authorized.
+  bool get shizukuReady => shizukuAvailable && shizukuGranted;
+
+  /// True when any control backend can inject input.
+  bool get controlReady => accessibilityEnabled || (shizukuAvailable && shizukuGranted);
 
   /// Longest side in px for scaled preview frames.
   int maxSide = 720;
@@ -89,6 +95,7 @@ class ScreenCaptureService extends ChangeNotifier {
       shizukuAvailable = m?['shizukuAvailable'] == true;
       shizukuGranted = m?['shizukuGranted'] == true;
       shizukuBound = m?['shizukuBound'] == true;
+      accessibilityEnabled = m?['accessibility'] == true;
       notifyListeners();
     } catch (_) {}
   }
@@ -111,6 +118,25 @@ class ScreenCaptureService extends ChangeNotifier {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Open Android Accessibility settings so the user can enable OpenBridge.
+  Future<bool> openAccessibilitySettings() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('openAccessibilitySettings');
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Refresh just the AccessibilityService enabled state.
+  Future<void> refreshAccessibility() async {
+    try {
+      final m = await _channel.invokeMethod<Map<Object?, Object?>>('accessibilityStatus');
+      accessibilityEnabled = m?['enabled'] == true;
+      notifyListeners();
+    } catch (_) {}
   }
 
   /// Request battery optimization bypass (opens system settings).

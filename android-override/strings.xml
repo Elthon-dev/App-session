@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="accessibility_description">OpenBridge uses this service to perform remote taps, swipes and navigation (Home / Back / Recents) and to fill text fields on your behalf while you control this phone from your computer. No data is collected or stored.</string>
+</resources>

@@ -2,6 +2,7 @@ package com.elthondev.openbridge
 
 import android.app.Activity
 import android.app.Service
+import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -206,6 +207,7 @@ class ScreenCaptureChannel(
                         "shizukuAvailable" to ShizukuControl.available(),
                         "shizukuGranted" to ShizukuControl.permissionGranted(),
                         "shizukuBound" to ShizukuControl.bound(),
+                        "accessibility" to ControlAccessibilityService.connected(),
                     )
                 )
             }
@@ -229,18 +231,41 @@ class ScreenCaptureChannel(
                 val metrics = activity.resources.displayMetrics
                 val px = (x * metrics.widthPixels).toInt()
                 val py = (y * metrics.heightPixels).toInt()
+                val px2 = ((x2 ?: x) * metrics.widthPixels).toInt()
+                val py2 = ((y2 ?: y) * metrics.heightPixels).toInt()
+                val keyCode = call.argument<Int>("keyCode") ?: 4
+                val text = call.argument<String>("text") ?: ""
                 try {
+                    // Accessibility first: needs no Shizuku/root and works on
+                    // devices (e.g. MediaTek) where Shizuku user services or
+                    // shell injection are unavailable.
+                    if (ControlAccessibilityService.connected()) {
+                        val done = when (action) {
+                            "tap" -> ControlAccessibilityService.tap(px.toFloat(), py.toFloat())
+                            "swipe" -> ControlAccessibilityService.swipe(
+                                px.toFloat(), py.toFloat(), px2.toFloat(), py2.toFloat(), 300
+                            )
+                            "key" -> when (keyCode) {
+                                4 -> ControlAccessibilityService.global(ControlAccessibilityService.GLOBAL_BACK)
+                                3 -> ControlAccessibilityService.global(ControlAccessibilityService.GLOBAL_HOME)
+                                187 -> ControlAccessibilityService.global(ControlAccessibilityService.GLOBAL_RECENTS)
+                                else -> false
+                            }
+                            "text" -> ControlAccessibilityService.setText(text)
+                            else -> false
+                        }
+                        if (done) {
+                            result.success(mapOf("ok" to true, "exit" to 0, "mode" to "accessibility"))
+                            return
+                        }
+                    }
+
                     val cmd = when (action) {
                         "tap" -> "input tap $px $py"
-                        "swipe" -> {
-                            val px2 = ((x2 ?: x) * metrics.widthPixels).toInt()
-                            val py2 = ((y2 ?: y) * metrics.heightPixels).toInt()
-                            "input swipe $px $py $px2 $py2 300"
-                        }
-                        "key" -> "input keyevent ${call.argument<Int>("keyCode") ?: 4}"
+                        "swipe" -> "input swipe $px $py $px2 $py2 300"
+                        "key" -> "input keyevent $keyCode"
                         "text" -> {
-                            val safe = (call.argument<String>("text") ?: "")
-                                .replace("'", "'\\''")
+                            val safe = text.replace("'", "'\\''")
                             "input text '$safe'"
                         }
                         else -> null
@@ -274,6 +299,19 @@ class ScreenCaptureChannel(
                 } catch (_: Exception) {
                     result.success(mapOf("ok" to false, "exit" to -1, "mode" to "error"))
                 }
+            }
+            "accessibilityStatus" -> {
+                result.success(mapOf("enabled" to ControlAccessibilityService.connected()))
+            }
+            "openAccessibilitySettings" -> {
+                result.success(try {
+                    val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    activity.startActivity(intent)
+                    true
+                } catch (_: Exception) {
+                    false
+                })
             }
             else -> result.notImplemented()
         }

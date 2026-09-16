@@ -17,7 +17,7 @@ class ScreenShareScreen extends StatefulWidget {
   State<ScreenShareScreen> createState() => _ScreenShareScreenState();
 }
 
-class _ScreenShareScreenState extends State<ScreenShareScreen> {
+class _ScreenShareScreenState extends State<ScreenShareScreen> with WidgetsBindingObserver {
   bool _assist = false;
   bool _starting = false;
   String? _error;
@@ -25,15 +25,25 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.relay.addListener(_onChanged);
     widget.capture.addListener(_onChanged);
+    widget.capture.refreshPermissions();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.relay.removeListener(_onChanged);
     widget.capture.removeListener(_onChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      widget.capture.refreshPermissions();
+    }
   }
 
   void _onChanged() {
@@ -195,6 +205,16 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
               actionLabel: 'Authorize',
               onAction: _busy ? null : () => _run(c.requestShizukuPermission),
             ),
+            _PermissionRow(
+              icon: Icons.accessibility_new,
+              title: 'Accessibility control',
+              subtitle: c.accessibilityEnabled
+                  ? 'OpenBridge can inject taps, swipes, Home / Back / Recents and text.'
+                  : 'Recommended fallback (needed on MediaTek and when Shizuku can’t bind).',
+              granted: c.accessibilityEnabled,
+              actionLabel: 'Enable',
+              onAction: _busy ? null : () => _run(c.openAccessibilitySettings),
+            ),
           ],
         ),
       ),
@@ -294,18 +314,25 @@ class _ControlStatusBanner extends StatelessWidget {
     final stuck = capture.shizukuStuck;
     final attempts = capture.shizukuAttempts;
     final version = capture.shizukuVersion;
+    final acc = capture.accessibilityEnabled;
+    final shizukuReady = capture.shizukuReady;
+    final available = capture.shizukuAvailable;
     final Color color;
     final String text;
     IconData icon;
-    if (ready && bound) {
+    if (bound) {
       color = Nord.success;
       icon = Icons.touch_app;
       text = 'Control ready — Shizuku active';
+    } else if (acc) {
+      color = Nord.success;
+      icon = Icons.touch_app;
+      text = 'Control ready — Accessibility active';
     } else if (stuck) {
       color = Nord.error;
       icon = Icons.error_outline;
       text = 'Control engine stuck (v$version, attempt $attempts)';
-    } else if (ready && !bound) {
+    } else if (shizukuReady && !bound) {
       color = Nord.warning;
       icon = Icons.sync_problem;
       text = 'Control engine warming up (attempt $attempts)…';
@@ -316,7 +343,7 @@ class _ControlStatusBanner extends StatelessWidget {
     } else {
       color = Nord.warning;
       icon = Icons.warning_amber_rounded;
-      text = 'Shizuku not running';
+      text = 'Enable Accessibility for control';
     }
 
     return Container(
@@ -359,25 +386,29 @@ class _ControlStatusBanner extends StatelessWidget {
 
   Future<void> _authorize(BuildContext context) async {
     final capture = this.capture;
-    if (capture.shizukuGranted) return;
-    if (!capture.shizukuAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Start Shizuku first (pull down the notification shade → Shizuku → Start).'),
-          backgroundColor: Nord.surface,
-        ),
-      );
+    // Prefer Shizuku when it is running and merely needs permission.
+    if (capture.shizukuAvailable && !capture.shizukuGranted) {
+      await capture.requestShizukuPermission();
+      if (context.mounted && capture.shizukuGranted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Shizuku ready — control active.'), backgroundColor: Nord.surface),
+        );
+      } else if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Open the Shizuku app and toggle OpenBridge to "ON" in Authorized apps.'),
+            backgroundColor: Nord.surface,
+          ),
+        );
+      }
       return;
     }
-    await capture.requestShizukuPermission();
-    if (context.mounted && capture.shizukuGranted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Shizuku ready — control active.'), backgroundColor: Nord.surface),
-      );
-    } else {
+    // Otherwise enable the Accessibility backend (works without Shizuku).
+    await capture.openAccessibilitySettings();
+    if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Open the Shizuku app and toggle OpenBridge to "ON" in Authorized apps.'),
+          content: Text('Enable "OpenBridge" under Downloaded apps → Accessibility, then return here.'),
           backgroundColor: Nord.surface,
         ),
       );
