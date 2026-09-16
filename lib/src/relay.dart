@@ -162,9 +162,9 @@ void _handle(dynamic raw) {
 
   void _handleControl(Map<String, dynamic> msg) {
     final action = msg['action'] as String? ?? '';
-    final x = (msg['x'] as num?)?.toDouble();
-    final y = (msg['y'] as num?)?.toDouble();
-    if (action.isEmpty || x == null || y == null) return;
+    if (action.isEmpty) return;
+    final x = (msg['x'] as num?)?.toDouble() ?? 0.5;
+    final y = (msg['y'] as num?)?.toDouble() ?? 0.5;
     onControl?.call(action, x, y, msg);
   }
 
@@ -219,8 +219,8 @@ void _handle(dynamic raw) {
     sendRaw({'type': 'screen', 'image': dataUrl});
   }
 
-  void sendGesture({required String type, required double x, required double y}) {
-    sendRaw({'type': 'gesture', 'type': type, 'x': x, 'y': y});
+  void sendGesture({required String gestureType, required double x, required double y}) {
+    sendRaw({'type': 'gesture', 'gesture': gestureType, 'x': x, 'y': y});
   }
 
   @override

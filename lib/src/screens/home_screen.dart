@@ -77,7 +77,9 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onControl(String action, double x, double y, Map<String, dynamic> raw) {
     final x2 = (raw['x2'] as num?)?.toDouble();
     final y2 = (raw['y2'] as num?)?.toDouble();
-    _capture.executeControl(action, x, y, x2: x2, y2: y2);
+    final keyCode = raw['keyCode'] as int?;
+    final text = raw['text'] as String?;
+    _capture.executeControl(action, x, y, x2: x2, y2: y2, keyCode: keyCode, text: text);
   }
 
   void _onSessionsChanged() {

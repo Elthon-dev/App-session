@@ -69,7 +69,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
   Future<void> _handleTap(TapUpDetails details, Size previewSize) async {
     if (!widget.capture.capturing || !_assist) return;
     widget.relay.sendGesture(
-      type: 'tap',
+      gestureType: 'tap',
       x: (details.localPosition.dx / previewSize.width).clamp(0.0, 1.0),
       y: (details.localPosition.dy / previewSize.height).clamp(0.0, 1.0),
     );
