@@ -19,6 +19,7 @@ import android.util.Base64
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import rikka.shizuku.Shizuku
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
 
@@ -54,9 +55,45 @@ class ScreenCaptureChannel(
 
     private var pendingStart: MethodChannel.Result? = null
 
+    @Volatile private var shizukuListenersAdded = false
+
     fun register() {
         projectionManager = activity.getSystemService(Service.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
         channel.setMethodCallHandler(this)
+        addShizukuListeners()
+    }
+
+    private fun addShizukuListeners() {
+        if (shizukuListenersAdded) return
+        shizukuListenersAdded = true
+        try {
+            Shizuku.addBinderReceivedListener(binderListener)
+            Shizuku.addBinderDeadListener(binderListener)
+            Shizuku.addRequestPermissionResultListener(permissionListener)
+        } catch (_: Throwable) {}
+    }
+
+    private val binderListener = object : Shizuku.OnBinderReceivedListener, Shizuku.OnBinderDeadListener {
+        override fun onBinderReceived() = notifyShizukuStatus()
+        override fun onBinderDead() = notifyShizukuStatus()
+    }
+
+    private val permissionListener = object : Shizuku.OnRequestPermissionResultListener {
+        override fun onRequestPermissionResult(requestCode: Int, grantResult: Int) {
+            if (requestCode == ShizukuControl.REQUEST_CODE) notifyShizukuStatus()
+        }
+    }
+
+    private fun notifyShizukuStatus() {
+        try {
+            channel.invokeMethod(
+                "shizukuStatusChanged",
+                mapOf(
+                    "available" to ShizukuControl.available(),
+                    "granted" to ShizukuControl.permissionGranted(),
+                )
+            )
+        } catch (_: Throwable) {}
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -86,6 +123,17 @@ class ScreenCaptureChannel(
                     result.success(false)
                 }
             }
+            "shizukuStatus" -> {
+                result.success(
+                    mapOf(
+                        "available" to ShizukuControl.available(),
+                        "granted" to ShizukuControl.permissionGranted(),
+                    )
+                )
+            }
+            "requestShizukuPermission" -> {
+                result.success(ShizukuControl.requestPermission())
+            }
             "executeControl" -> {
                 val action = call.argument<String>("action") ?: ""
                 val x = call.argument<Number>("x")?.toDouble() ?: 0.5
@@ -107,12 +155,21 @@ class ScreenCaptureChannel(
                         "text" -> "input text '${call.argument<String>("text") ?: ""}'"
                         else -> null
                     }
-                    if (cmd != null) {
-                        Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-                        result.success(true)
-                    } else {
+                    if (cmd == null) {
                         result.success(false)
+                        return
                     }
+                    if (ShizukuControl.canControl()) {
+                        ShizukuControl.execute(cmd)
+                    } else {
+                        try {
+                            Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                        } catch (_: Exception) {
+                            result.success(false)
+                            return
+                        }
+                    }
+                    result.success(true)
                 } catch (_: Exception) {
                     result.success(false)
                 }

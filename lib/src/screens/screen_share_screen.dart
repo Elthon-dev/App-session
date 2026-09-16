@@ -83,6 +83,7 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
 
     return Column(
       children: [
+        _ControlStatusBanner(capture: capture),
         Expanded(
           child: capturing
               ? _Preview(
@@ -107,6 +108,89 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
         ),
       ],
     );
+  }
+}
+
+class _ControlStatusBanner extends StatelessWidget {
+  const _ControlStatusBanner({required this.capture});
+
+  final ScreenCaptureService capture;
+
+  @override
+  Widget build(BuildContext context) {
+    final ready = capture.controlReady;
+    final available = capture.shizukuAvailable;
+    final Color color;
+    final String text;
+    IconData icon;
+    if (ready) {
+      color = Nord.success;
+      icon = Icons.touch_app;
+      text = 'Control ready — Shizuku active';
+    } else if (available) {
+      color = Nord.warning;
+      icon = Icons.shield_outlined;
+      text = 'Control needs permission';
+    } else {
+      color = Nord.warning;
+      icon = Icons.warning_amber_rounded;
+      text = 'Shizuku not running';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      color: Nord.surface,
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: color),
+          ),
+          const Spacer(),
+          if (!ready)
+            InkWell(
+              onTap: () => _authorize(context),
+              borderRadius: BorderRadius.circular(8),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Text(
+                  'Fix',
+                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: Nord.accent),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _authorize(BuildContext context) async {
+    final capture = this.capture;
+    if (capture.shizukuGranted) return;
+    if (!capture.shizukuAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Start Shizuku first (pull down the notification shade → Shizuku → Start).'),
+          backgroundColor: Nord.surface,
+        ),
+      );
+      return;
+    }
+    await capture.requestShizukuPermission();
+    if (context.mounted && capture.shizukuGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Shizuku ready — control active.'), backgroundColor: Nord.surface),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Open the Shizuku app and toggle OpenBridge to "ON" in Authorized apps.'),
+          backgroundColor: Nord.surface,
+        ),
+      );
+    }
   }
 }
 

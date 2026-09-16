@@ -35,7 +35,38 @@ jobs:
           cp android-override/MainActivity.kt android/app/src/main/kotlin/com/elthondev/openbridge/MainActivity.kt
           cp android-override/ScreenCaptureChannel.kt android/app/src/main/kotlin/com/elthondev/openbridge/ScreenCaptureChannel.kt
           cp android-override/ProjectionService.kt android/app/src/main/kotlin/com/elthondev/openbridge/ProjectionService.kt
+          cp android-override/ShizukuControl.kt android/app/src/main/kotlin/com/elthondev/openbridge/ShizukuControl.kt
           cp android-override/ic_stat_openbridge.xml android/app/src/main/res/drawable/ic_stat_openbridge.xml
+
+      - name: Inject Shizuku dependencies
+        run: |
+          APP_GRADLE=android/app/build.gradle.kts
+          if [ ! -f "$APP_GRADLE" ]; then APP_GRADLE=android/app/build.gradle; fi
+          SETTINGS=android/settings.gradle.kts
+          if [ ! -f "$SETTINGS" ]; then SETTINGS=android/settings.gradle; fi
+          echo "Using $APP_GRADLE and $SETTINGS"
+          # Make sure mavenCentral is available for dependency resolution.
+          if ! grep -q "mavenCentral" "$SETTINGS"; then
+            echo "Adding mavenCentral to $SETTINGS"
+            echo "" >> "$SETTINGS"
+            echo "dependencyResolutionManagement {" >> "$SETTINGS"
+            echo "    repositoriesMode = RepositoriesMode.FAIL_ON_PROJECT_REPOS" >> "$SETTINGS"
+            echo "    repositories {" >> "$SETTINGS"
+            echo "        google()" >> "$SETTINGS"
+            echo "        mavenCentral()" >> "$SETTINGS"
+            echo "    }" >> "$SETTINGS"
+            echo "}" >> "$SETTINGS"
+          fi
+          # Shizuku needs minSdk >= 23.
+          sed -i "s/minSdk = flutter.minSdkVersion/minSdk = 23/" "$APP_GRADLE"
+          sed -i "s/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/" "$APP_GRADLE"
+          # Append Shizuku dependency declarations (works in both Groovy & Kotlin DSL).
+          if ! grep -q "dev.rikka.shizuku" "$APP_GRADLE"; then
+            echo "Adding Shizuku dependencies to $APP_GRADLE"
+            printf '\ndependencies {\n    implementation("dev.rikka.shizuku:api:13.1.5")\n    implementation("dev.rikka.shizuku:provider:13.1.5")\n}\n' >> "$APP_GRADLE"
+          fi
+          echo "--- $APP_GRADLE tail ---"
+          tail -12 "$APP_GRADLE"
 
       - name: Build release APK
         run: flutter build apk --release

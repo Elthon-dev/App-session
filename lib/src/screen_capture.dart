@@ -12,6 +12,15 @@ class ScreenCaptureService extends ChangeNotifier {
   String? lastFrame;
   Timer? _timer;
 
+  /// Shizuku is running on the device.
+  bool shizukuAvailable = false;
+
+  /// OpenBridge is authorized inside the Shizuku app.
+  bool shizukuGranted = false;
+
+  /// True when shell-based control commands will actually work.
+  bool get controlReady => shizukuAvailable && shizukuGranted;
+
   /// Longest side in px for scaled preview frames.
   int maxSide = 720;
 
@@ -21,11 +30,34 @@ class ScreenCaptureService extends ChangeNotifier {
   /// Set up the Dart-side handler for native -> Dart notifications.
   void bind() {
     _channel.setMethodCallHandler((call) async {
-      if (call.method == 'captureStopped') {
-        await stop();
+      switch (call.method) {
+        case 'captureStopped':
+          await stop();
+        case 'shizukuStatusChanged':
+          await refreshShizuku();
       }
       return null;
     });
+  }
+
+  /// Query current Shizuku availability + permission state from native.
+  Future<void> refreshShizuku() async {
+    try {
+      final m = await _channel.invokeMethod<Map<Object?, Object?>>('shizukuStatus');
+      shizukuAvailable = m?['available'] == true;
+      shizukuGranted = m?['granted'] == true;
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  /// Ask the user to authorize OpenBridge inside the Shizuku app.
+  Future<bool> requestShizukuPermission() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('requestShizukuPermission');
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Request battery optimization bypass (opens system settings).
