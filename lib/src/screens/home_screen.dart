@@ -74,6 +74,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onRelay() => setState(() {});
 
+  void _onControl(String action, double x, double y, Map<String, dynamic> raw) {
+    final x2 = (raw['x2'] as num?)?.toDouble();
+    final y2 = (raw['y2'] as num?)?.toDouble();
+    _capture.executeControl(action, x, y, x2: x2, y2: y2);
+  }
+
   void _onSessionsChanged() {
     final active = _sessions.active;
     if (active == null) return;
@@ -85,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _relay?.removeListener(_onRelay);
     _relay?.dispose();
     final relay = RelayClient(url: active.serverUrl);
+    relay.onControl = _onControl;
     relay.addListener(_onRelay);
     setState(() => _relay = relay);
     relay.connect();
@@ -94,6 +101,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _relay?.removeListener(_onRelay);
     _relay?.dispose();
     final relay = RelayClient(url: url);
+    relay.onControl = _onControl;
     relay.addListener(_onRelay);
     setState(() => _relay = relay);
     await relay.connect();

@@ -86,6 +86,37 @@ class ScreenCaptureChannel(
                     result.success(false)
                 }
             }
+            "executeControl" -> {
+                val action = call.argument<String>("action") ?: ""
+                val x = call.argument<Number>("x")?.toDouble() ?: 0.5
+                val y = call.argument<Number>("y")?.toDouble() ?: 0.5
+                val x2 = call.argument<Number>("x2")?.toDouble()
+                val y2 = call.argument<Number>("y2")?.toDouble()
+                val metrics = activity.resources.displayMetrics
+                val px = (x * metrics.widthPixels).toInt()
+                val py = (y * metrics.heightPixels).toInt()
+                try {
+                    val cmd = when (action) {
+                        "tap" -> "input tap $px $py"
+                        "swipe" -> {
+                            val px2 = ((x2 ?: x) * metrics.widthPixels).toInt()
+                            val py2 = ((y2 ?: y) * metrics.heightPixels).toInt()
+                            "input swipe $px $py $px2 $py2 300"
+                        }
+                        "key" -> "input keyevent ${call.argument<Int>("keyCode") ?: 4}"
+                        "text" -> "input text '${call.argument<String>("text") ?: ""}'"
+                        else -> null
+                    }
+                    if (cmd != null) {
+                        Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                        result.success(true)
+                    } else {
+                        result.success(false)
+                    }
+                } catch (_: Exception) {
+                    result.success(false)
+                }
+            }
             else -> result.notImplemented()
         }
     }

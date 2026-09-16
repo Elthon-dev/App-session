@@ -107,7 +107,7 @@ class RelayClient extends ChangeNotifier {
     }
   }
 
-  void _handle(dynamic raw) {
+void _handle(dynamic raw) {
     try {
       final j = jsonDecode(raw as String) as Map<String, dynamic>;
       final type = j['type'] as String? ?? '';
@@ -152,6 +152,29 @@ class RelayClient extends ChangeNotifier {
           break;
         case 'ping':
           sendRaw({'type': 'pong'});
+          break;
+        case 'control':
+          _handleControl(j);
+          break;
+      }
+    } catch (_) {}
+  }
+
+  void _handleControl(Map<String, dynamic> msg) {
+    final action = msg['action'] as String? ?? '';
+    final x = (msg['x'] as num?)?.toDouble();
+    final y = (msg['y'] as num?)?.toDouble();
+    if (action.isEmpty || x == null || y == null) return;
+    onControl?.call(action, x, y, msg);
+  }
+
+  void Function(String action, double x, double y, Map<String, dynamic> raw)? onControl;
+          break;
+        case 'ping':
+          sendRaw({'type': 'pong'});
+          break;
+        case 'control':
+          _handleControl(j);
           break;
       }
     } catch (_) {}

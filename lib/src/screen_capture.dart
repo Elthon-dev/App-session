@@ -38,6 +38,22 @@ class ScreenCaptureService extends ChangeNotifier {
     }
   }
 
+  /// Execute a screen control action (tap, swipe) via shell.
+  Future<bool> executeControl(String action, double x, double y, {double? x2, double? y2}) async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('executeControl', {
+        'action': action,
+        'x': x,
+        'y': y,
+        if (x2 != null) 'x2': x2,
+        if (y2 != null) 'y2': y2,
+      });
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> start() async {
     try {
       final ok = await _channel.invokeMethod<bool>('startCapture', {
