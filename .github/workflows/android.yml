@@ -84,42 +84,40 @@ jobs:
           echo "Signing config -> $APP_GRADLE"
           if [[ "$APP_GRADLE" == *.kts ]]; then
             cat >> "$APP_GRADLE" <<'EOF'
-
-android {
-    signingConfigs {
-        create("release") {
-            storeFile = file(System.getenv("OPENBRIDGE_KEYSTORE") ?: "/tmp/missing.jks")
-            storePassword = System.getenv("OPENBRIDGE_STORE_PASS") ?: "x"
-            keyAlias = System.getenv("OPENBRIDGE_KEY_ALIAS") ?: "x"
-            keyPassword = System.getenv("OPENBRIDGE_KEY_PASS") ?: "x"
-        }
-    }
-    buildTypes {
-        getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
-        }
-    }
-}
-EOF
+          android {
+              signingConfigs {
+                  create("release") {
+                      storeFile = file(System.getenv("OPENBRIDGE_KEYSTORE") ?: "/tmp/missing.jks")
+                      storePassword = System.getenv("OPENBRIDGE_STORE_PASS") ?: "x"
+                      keyAlias = System.getenv("OPENBRIDGE_KEY_ALIAS") ?: "x"
+                      keyPassword = System.getenv("OPENBRIDGE_KEY_PASS") ?: "x"
+                  }
+              }
+              buildTypes {
+                  getByName("release") {
+                      signingConfig = signingConfigs.getByName("release")
+                  }
+              }
+          }
+          EOF
           else
             cat >> "$APP_GRADLE" <<'EOF'
-
-android {
-    signingConfigs {
-        release {
-            storeFile file(System.getenv("OPENBRIDGE_KEYSTORE"))
-            storePassword System.getenv("OPENBRIDGE_STORE_PASS")
-            keyAlias System.getenv("OPENBRIDGE_KEY_ALIAS")
-            keyPassword System.getenv("OPENBRIDGE_KEY_PASS")
-        }
-    }
-    buildTypes {
-        release {
-            signingConfig signingConfigs.release
-        }
-    }
-}
-EOF
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file(System.getenv("OPENBRIDGE_KEYSTORE"))
+                      storePassword System.getenv("OPENBRIDGE_STORE_PASS")
+                      keyAlias System.getenv("OPENBRIDGE_KEY_ALIAS")
+                      keyPassword System.getenv("OPENBRIDGE_KEY_PASS")
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
           fi
           tail -22 "$APP_GRADLE"
 
