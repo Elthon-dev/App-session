@@ -37,6 +37,39 @@ class OverlayData {
   final int ttl;
 }
 
+class ModelInfo {
+  ModelInfo({required this.providerID, required this.modelID, required this.name});
+
+  factory ModelInfo.fromJson(Map<String, dynamic> j) => ModelInfo(
+        providerID: j['providerID'] as String? ?? '',
+        modelID: j['modelID'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+      );
+
+  final String providerID;
+  final String modelID;
+  final String name;
+
+  String get label => name.isNotEmpty ? name : modelID;
+  String get qualified => '$providerID/$modelID';
+
+  Map<String, dynamic> toJson() => {'providerID': providerID, 'modelID': modelID, 'name': name};
+}
+
+class AgentInfo {
+  AgentInfo({required this.name, this.description = '', this.builtIn = false});
+
+  factory AgentInfo.fromJson(Map<String, dynamic> j) => AgentInfo(
+        name: j['name'] as String? ?? '',
+        description: j['description'] as String? ?? '',
+        builtIn: j['builtIn'] as bool? ?? false,
+      );
+
+  final String name;
+  final String description;
+  final bool builtIn;
+}
+
 class RelayClient extends ChangeNotifier {
   RelayClient({required this.url}) {
     _sessionId = 'ob${1000 + Random().nextInt(9000)}';
@@ -55,6 +88,13 @@ class RelayClient extends ChangeNotifier {
   List<ChatMessage> messages = [];
   OverlayData? overlay;
   String? errorText;
+
+  List<ModelInfo> models = [];
+  List<AgentInfo> agents = [];
+  ModelInfo? selectedModel;
+  AgentInfo? selectedAgent;
+
+  bool get loaded => models.isNotEmpty || agents.isNotEmpty;
 
   bool get connected => state == RelayState.connected;
   bool get busy => state == RelayState.connecting;
@@ -86,6 +126,10 @@ class RelayClient extends ChangeNotifier {
     messages.clear();
     overlay = null;
     errorText = null;
+    models = [];
+    agents = [];
+    selectedModel = null;
+    selectedAgent = null;
     _set(RelayState.connecting);
 
     try {
@@ -115,6 +159,10 @@ void _handle(dynamic raw) {
         case 'ready':
           _attempts = 0;
           _set(RelayState.connected);
+          sendRaw({'type': 'get-config'});
+          break;
+        case 'config':
+          _handleConfig(j);
           break;
         case 'chat':
           final t = j['text'] as String? ?? '';
@@ -158,6 +206,42 @@ void _handle(dynamic raw) {
           break;
       }
     } catch (_) {}
+  }
+
+  void _handleConfig(Map<String, dynamic> j) {
+    final rawModels = (j['models'] as List?) ?? const [];
+    models = rawModels
+        .whereType<Map<String, dynamic>>()
+        .map(ModelInfo.fromJson)
+        .where((m) => m.modelID.isNotEmpty || m.name.isNotEmpty)
+        .toList();
+
+    final rawAgents = (j['agents'] as List?) ?? const [];
+    agents = rawAgents
+        .whereType<Map<String, dynamic>>()
+        .map(AgentInfo.fromJson)
+        .where((a) => a.name.isNotEmpty)
+        .toList();
+
+    final cur = j['current'] as Map<String, dynamic>?;
+    if (cur != null) {
+      final curModel = cur['model'] as Map<String, dynamic>?;
+      if (curModel != null && (curModel['modelID'] as String?)?.isNotEmpty == true) {
+        selectedModel = ModelInfo.fromJson(curModel);
+      }
+      final curAgent = cur['agent'] as String?;
+      if ((curAgent ?? '').isNotEmpty) {
+        AgentInfo? match;
+        for (final a in agents) {
+          if (a.name == curAgent) {
+            match = a;
+            break;
+          }
+        }
+        selectedAgent = match ?? AgentInfo(name: curAgent!);
+      }
+    }
+    notifyListeners();
   }
 
   void _handleControl(Map<String, dynamic> msg) {
@@ -221,6 +305,18 @@ void _handle(dynamic raw) {
 
   void sendGesture({required String gestureType, required double x, required double y}) {
     sendRaw({'type': 'gesture', 'gesture': gestureType, 'x': x, 'y': y});
+  }
+
+  void selectModel(ModelInfo model) {
+    selectedModel = model;
+    notifyListeners();
+    sendRaw({'type': 'model', ...model.toJson()});
+  }
+
+  void selectAgent(AgentInfo agent) {
+    selectedAgent = agent;
+    notifyListeners();
+    sendRaw({'type': 'agent', 'agent': agent.name});
   }
 
   @override

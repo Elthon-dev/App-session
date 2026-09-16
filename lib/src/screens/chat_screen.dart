@@ -124,6 +124,11 @@ class _ChatScreenState extends State<ChatScreen> {
         Expanded(
           child: messages.isEmpty ? _EmptyState() : _MessageList(relay: widget.relay, scroll: _scroll),
         ),
+        _PickerBar(
+          relay: widget.relay,
+          onModel: _openModelPicker,
+          onAgent: _openAgentPicker,
+        ),
         AnimatedSize(
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOutCubic,
@@ -134,6 +139,64 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         _Composer(controller: _input, focus: _inputFocus, onSend: _send),
       ],
+    );
+  }
+
+  void _openModelPicker() {
+    final models = widget.relay.models;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Nord.bg,
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        return _PickerSheet<ModelInfo>(
+          title: 'Model',
+          icon: Icons.memory_outlined,
+          items: models,
+          emptyText: 'No models received yet.\nRestart Opencode, then tap Sync.',
+          selected: widget.relay.selectedModel,
+          labelOf: (m) => m.label,
+          subtitleOf: (m) => m.providerID,
+          selectedOf: (m) => widget.relay.selectedModel?.modelID == m.modelID,
+          onPick: (m) {
+            widget.relay.selectModel(m);
+            Navigator.pop(ctx);
+          },
+          onRefresh: () => widget.relay.sendRaw({'type': 'get-config'}),
+        );
+      },
+    );
+  }
+
+  void _openAgentPicker() {
+    final agents = widget.relay.agents;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Nord.bg,
+      barrierColor: Colors.black54,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) {
+        return _PickerSheet<AgentInfo>(
+          title: 'Agent',
+          icon: Icons.auto_awesome_outlined,
+          items: agents,
+          emptyText: 'No agents received yet.\nRestart Opencode, then tap Sync.',
+          selected: widget.relay.selectedAgent,
+          labelOf: (a) => a.name,
+          subtitleOf: (a) => a.description,
+          selectedOf: (a) => widget.relay.selectedAgent?.name == a.name,
+          onPick: (a) {
+            widget.relay.selectAgent(a);
+            Navigator.pop(ctx);
+          },
+          onRefresh: () => widget.relay.sendRaw({'type': 'get-config'}),
+        );
+      },
     );
   }
 }
@@ -188,6 +251,246 @@ class _CommandPalette extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _PickerBar extends StatelessWidget {
+  const _PickerBar({required this.relay, required this.onModel, required this.onAgent});
+
+  final RelayClient relay;
+  final VoidCallback onModel;
+  final VoidCallback onAgent;
+
+  Widget _pill({
+    required IconData icon,
+    required String label,
+    required bool active,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Nord.surface,
+      borderRadius: BorderRadius.circular(20),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: active ? Nord.info.withValues(alpha: 0.8) : Nord.border,
+              width: active ? 1.3 : 0.7,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 13, color: active ? Nord.info : Nord.muted),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 130),
+                child: Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: active ? Nord.text1 : Nord.text2,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.expand_more, size: 14, color: Nord.muted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final model = relay.selectedModel;
+    final agent = relay.selectedAgent;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+      color: Nord.bg,
+      child: Row(
+        children: [
+          _pill(
+            icon: Icons.memory,
+            label: model?.label ?? 'Model',
+            active: model != null,
+            onTap: onModel,
+          ),
+          const SizedBox(width: 8),
+          _pill(
+            icon: Icons.auto_awesome,
+            label: agent?.name ?? 'Agent',
+            active: agent != null,
+            onTap: onAgent,
+          ),
+          const Spacer(),
+          if (!relay.loaded)
+            const Padding(
+              padding: EdgeInsets.only(right: 4),
+              child: SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 1.6, color: Nord.muted),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PickerSheet<T> extends StatelessWidget {
+  const _PickerSheet({
+    required this.title,
+    required this.icon,
+    required this.items,
+    required this.emptyText,
+    required this.selected,
+    required this.labelOf,
+    required this.subtitleOf,
+    required this.selectedOf,
+    required this.onPick,
+    required this.onRefresh,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<T> items;
+  final String emptyText;
+  final T? selected;
+  final String Function(T) labelOf;
+  final String Function(T) subtitleOf;
+  final bool Function(T) selectedOf;
+  final ValueChanged<T> onPick;
+  final VoidCallback onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final tileH = 60.0;
+    final listH = items.isEmpty ? 130.0 : (items.length * tileH).clamp(0.0, tileH * 6.0);
+    return SafeArea(
+      child: SizedBox(
+        width: double.infinity,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(color: Nord.border, borderRadius: BorderRadius.circular(2)),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 10, 8, 4),
+              child: Row(
+                children: [
+                  Icon(icon, size: 17, color: Nord.info),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      'Select $title',
+                      style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700, color: Nord.text1),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: onRefresh,
+                    tooltip: 'Sync from Opencode',
+                    icon: const Icon(Icons.sync, size: 18, color: Nord.muted),
+                  ),
+                ],
+              ),
+            ),
+            items.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+                    child: Text(
+                      emptyText,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12.5, height: 1.5, color: Nord.muted),
+                    ),
+                  )
+                : SizedBox(
+                    height: listH,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: items.length,
+                      itemBuilder: (context, i) {
+                        final item = items[i];
+                        final isSel = selectedOf(item);
+                        return InkWell(
+                          onTap: () => onPick(item),
+                          child: Container(
+                            height: tileH,
+                            padding: const EdgeInsets.symmetric(horizontal: 18),
+                            decoration: BoxDecoration(
+                              color: isSel ? Nord.surface : Colors.transparent,
+                              border: Border(bottom: BorderSide(color: Nord.border.withValues(alpha: 0.4), width: 0.4)),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: isSel ? Nord.accent : Nord.muted,
+                                      width: 1.6,
+                                    ),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: isSel
+                                      ? Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: const BoxDecoration(shape: BoxShape.circle, color: Nord.accent),
+                                        )
+                                      : null,
+                                ),
+                                const SizedBox(width: 13),
+                                Expanded(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        labelOf(item),
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 13.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: isSel ? Nord.text1 : Nord.text2,
+                                        ),
+                                      ),
+                                      if (subtitleOf(item).isNotEmpty)
+                                        Text(
+                                          subtitleOf(item),
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(fontSize: 11, color: Nord.muted),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                if (isSel) const Icon(Icons.check, size: 17, color: Nord.accent),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+          ],
+        ),
       ),
     );
   }

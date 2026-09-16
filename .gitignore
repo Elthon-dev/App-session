@@ -10,6 +10,9 @@ server/node_modules/
 plugin/node_modules/
 .bridge-frames/
 
+# Session memory (never commit)
+.memory/
+
 # IDE / OS
 .idea/
 *.iml

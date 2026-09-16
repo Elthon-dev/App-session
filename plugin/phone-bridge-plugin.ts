@@ -15,6 +15,8 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
   let reconnectTimer = null as any
 
   let lastForwarded: string | null = null
+  let selectedModel: { providerID: string; modelID: string } | null = null
+  let selectedAgent: string | null = null
 
   const forward = (t: string) => {
     const clean = String(t || '')
@@ -30,6 +32,51 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
   const send = (msg: Record<string, unknown>) => {
     if (socket && socket.readyState === 1) {
       socket.send(JSON.stringify(msg))
+    }
+  }
+
+  const sendConfig = async () => {
+    try {
+      const [providersRes, agentsRes, sessionRes]: any[] = await Promise.all([
+        client.config.providers(),
+        client.app.agents(),
+        client.session.list(),
+      ])
+      const models: Array<{ providerID: string; modelID: string; name: string }> = []
+      for (const p of providersRes?.data ?? []) {
+        for (const m of Object.values(p?.models ?? {})) {
+          const mm = m as any
+          models.push({ providerID: p.id, modelID: mm?.id ?? String(mm?.name ?? ''), name: mm?.name || mm?.id || '' })
+        }
+      }
+      const agents: Array<{ name: string; description: string; builtIn: boolean }> = []
+      for (const a of agentsRes?.data ?? []) {
+        agents.push({
+          name: a?.name ?? '',
+          description: a?.description ?? '',
+          builtIn: !!a?.builtIn,
+        })
+      }
+      let current: { model: { providerID: string; modelID: string } | null; agent: string | null } = {
+        model: selectedModel,
+        agent: selectedAgent,
+      }
+      try {
+        const latest = (sessionRes?.data ?? []).sort(
+          (a: any, b: any) =>
+            new Date(b.time?.updated ?? b.time?.created ?? 0).getTime() -
+            new Date(a.time?.updated ?? a.time?.created ?? 0).getTime()
+        )[0]
+        if (latest) {
+          current = {
+            model: selectedModel ?? latest?.model ?? null,
+            agent: selectedAgent ?? latest?.agent ?? null,
+          }
+        }
+      } catch {}
+      send({ type: 'config', models, agents, current })
+    } catch (err: any) {
+      console.error('[openbridge] config fetch failed:', err?.message)
     }
   }
 
@@ -49,10 +96,37 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
         if (data.type === 'peer') {
           phone = data.sessionId || phone
           console.log(`[openbridge] phone joined: ${phone}`)
+          sendConfig()
           return
         }
         if (data.type === 'peer-left') {
           phone = null
+        }
+
+        if (data.type === 'get-config' && data.from === 'phone') {
+          sendConfig()
+          return
+        }
+
+        if (data.type === 'model' && data.from === 'phone') {
+          const providerID = String(data.providerID || '')
+          const modelID = String(data.modelID || '')
+          if (providerID && modelID) {
+            selectedModel = { providerID, modelID }
+            send({ type: 'toast', text: `Model: ${modelID}` })
+            send({ type: 'chat', text: `✅ Switched to model **${modelID}** (${providerID}) — applies to the next message.` })
+          }
+          return
+        }
+
+        if (data.type === 'agent' && data.from === 'phone') {
+          const name = String(data.agent || '')
+          if (name) {
+            selectedAgent = name
+            send({ type: 'toast', text: `Agent: ${name}` })
+            send({ type: 'chat', text: `✅ Switched to agent **${name}** — applies to the next message.` })
+          }
+          return
         }
 
         if (data.type === 'chat' && data.from === 'phone') {
@@ -81,9 +155,12 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
             }
             currentSessionID = sessionID
             lastForwarded = null
+            const body: any = { parts: [{ type: 'text', text }] }
+            if (selectedModel) body.model = selectedModel
+            if (selectedAgent) body.agent = selectedAgent
             const res: any = await client.session.prompt({
               path: { id: sessionID },
-              body: { parts: [{ type: 'text', text }] },
+              body,
             })
             const parts = res?.data?.info?.parts ?? res?.data?.parts ?? res?.data ?? []
             for (const p of parts) {
@@ -136,6 +213,7 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
   }
 
   connect()
+  setTimeout(sendConfig, 1500)
   agent = client
 
   return {
