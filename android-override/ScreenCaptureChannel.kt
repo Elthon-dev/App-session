@@ -139,12 +139,19 @@ class ScreenCaptureChannel(
         val dispH = metrics.heightPixels
         val density = metrics.densityDpi
 
+        // Scale capture resolution to maxSide to avoid OOM on high-DPI screens.
+        // Full-res RGBA_8888 (e.g. 1080×2400) is ~10 MB per buffer; cutting to
+        // ~720 px saves ~70 % of that and avoids the low-memory killer.
+        val scale = maxSide.toFloat() / max(dispW, dispH).coerceAtLeast(1)
+        val imgW = (dispW * scale).toInt().coerceAtLeast(1)
+        val imgH = (dispH * scale).toInt().coerceAtLeast(1)
+
         captureThread = HandlerThread("openbridge-capture").also { it.start() }
         val thread = captureThread!!
         val loop = Handler(thread.looper)
         captureHandler = loop
 
-        val reader = ImageReader.newInstance(dispW, dispH, PixelFormat.RGBA_8888, 2)
+        val reader = ImageReader.newInstance(imgW, imgH, PixelFormat.RGBA_8888, 1)
         imageReader = reader
 
         reader.setOnImageAvailableListener({ r ->
@@ -159,14 +166,14 @@ class ScreenCaptureChannel(
                 val buffer = plane.buffer
                 val pixelStride = plane.pixelStride
                 val rowStride = plane.rowStride
-                val rowPadding = rowStride - pixelStride * dispW
+                val rowPadding = rowStride - pixelStride * imgW
                 val padded = Bitmap.createBitmap(
-                    dispW + rowPadding / pixelStride,
-                    dispH,
+                    imgW + rowPadding / pixelStride,
+                    imgH,
                     Bitmap.Config.ARGB_8888
                 )
                 padded.copyPixelsFromBuffer(buffer)
-                val cropped = Bitmap.createBitmap(padded, 0, 0, dispW, dispH)
+                val cropped = Bitmap.createBitmap(padded, 0, 0, imgW, imgH)
                 padded.recycle()
                 lastBitmap?.recycle()
                 lastBitmap = cropped
@@ -188,8 +195,8 @@ class ScreenCaptureChannel(
 
         virtualDisplay = projection.createVirtualDisplay(
             "OpenBridgeCapture",
-            dispW,
-            dispH,
+            imgW,
+            imgH,
             density,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             reader.surface,
