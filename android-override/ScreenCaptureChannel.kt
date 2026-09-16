@@ -14,6 +14,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.PowerManager
 import android.util.Base64
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -49,6 +50,7 @@ class ScreenCaptureChannel(
     @Volatile private var maxSide = 720
     @Volatile private var jpegQuality = 60
     @Volatile private var started = false
+    private var wakeLock: PowerManager.WakeLock? = null
 
     private var pendingStart: MethodChannel.Result? = null
 
@@ -74,6 +76,16 @@ class ScreenCaptureChannel(
             }
 
             "isCapturing" -> result.success(started)
+            "requestBatteryBypass" -> {
+                try {
+                    val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    intent.data = android.net.Uri.parse("package:${activity.packageName}")
+                    activity.startActivity(intent)
+                    result.success(true)
+                } catch (_: Exception) {
+                    result.success(false)
+                }
+            }
             else -> result.notImplemented()
         }
     }
@@ -134,6 +146,15 @@ class ScreenCaptureChannel(
 
     @android.annotation.SuppressLint("WrongConstant")
     private fun setupProjection(projection: MediaProjection) {
+        // Acquire WakeLock to keep CPU alive during screen capture
+        try {
+            val pm = activity.getSystemService(Service.POWER_SERVICE) as? PowerManager
+            wakeLock = pm?.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "openbridge:capture"
+            )?.apply { acquire(4 * 60 * 60 * 1000L) } // 4 hours max
+        } catch (_: Exception) {}
+
         val metrics = activity.resources.displayMetrics
         val dispW = metrics.widthPixels
         val dispH = metrics.heightPixels
@@ -230,6 +251,10 @@ class ScreenCaptureChannel(
 
     private fun stop() {
         started = false
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (_: Exception) {}
+        wakeLock = null
         try {
             virtualDisplay?.release()
         } catch (_: Exception) {}

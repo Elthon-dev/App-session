@@ -28,6 +28,16 @@ class ScreenCaptureService extends ChangeNotifier {
     });
   }
 
+  /// Request battery optimization bypass (opens system settings).
+  Future<bool> requestBatteryBypass() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('requestBatteryBypass');
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> start() async {
     try {
       final ok = await _channel.invokeMethod<bool>('startCapture', {

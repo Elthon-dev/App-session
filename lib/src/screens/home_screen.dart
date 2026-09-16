@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../relay.dart';
 import '../screen_capture.dart';
@@ -31,6 +32,34 @@ class _HomeScreenState extends State<HomeScreen> {
     _capture.bind();
     _sessions.addListener(_onSessionsChanged);
     _sessions.load();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkBatteryBypass());
+  }
+
+  Future<void> _checkBatteryBypass() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool('battery_bypass_done') == true) return;
+    if (!mounted) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Nord.surface,
+        title: const Text('Keep alive during capture', style: TextStyle(color: Nord.text1)),
+        content: const Text(
+          'Android may kill OpenBridge while screen sharing is active. '
+          'Allow unrestricted battery usage to prevent crashes?',
+          style: TextStyle(color: Nord.muted, fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Skip')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Allow', style: TextStyle(color: Nord.accent)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) await _capture.requestBatteryBypass();
+    if (mounted) await prefs.setBool('battery_bypass_done', true);
   }
 
   @override
