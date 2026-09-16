@@ -27,28 +27,40 @@ class ProjectionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureNotificationChannel()
-        if (!startForegroundSafely()) return START_NOT_STICKY
+        if (!startForegroundSafely()) {
+            deliver(null, foregroundError)
+            return START_NOT_STICKY
+        }
 
         val code = intent?.getIntExtra(EXTRA_CODE, -1) ?: -1
         val data = extractData(intent)
+        var projection: MediaProjection? = null
+        var error: String? = null
         if (code != -1 && data != null) {
             val pm =
                 getSystemService(Service.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
-            val projection: MediaProjection? = try {
-                pm?.getMediaProjection(code, data)
-            } catch (_: Exception) {
-                null
+            try {
+                projection = pm?.getMediaProjection(code, data)
+            } catch (e: Exception) {
+                error = e.toString()
             }
-            val cb = callback
-            callback = null
-            if (cb != null) cb(projection)
         }
+        deliver(projection, error)
 
         return START_STICKY
     }
 
+    private fun deliver(projection: MediaProjection?, error: String?) {
+        val cb = callback
+        callback = null
+        if (cb != null) cb(projection, error)
+    }
+
+    private var foregroundError: String? = null
+
     private fun startForegroundSafely(): Boolean {
         val notification = buildNotification()
+        foregroundError = null
         return try {
             if (Build.VERSION.SDK_INT >= 29) {
                 startForeground(
@@ -61,7 +73,8 @@ class ProjectionService : Service() {
                 startForeground(NOTIFICATION_ID, notification)
             }
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            foregroundError = e.toString()
             false
         }
     }
@@ -117,10 +130,10 @@ class ProjectionService : Service() {
         private const val EXTRA_DATA = "extra_data"
 
         @Volatile
-        private var callback: ((MediaProjection?) -> Unit)? = null
+        private var callback: ((MediaProjection?, String?) -> Unit)? = null
 
         /** Set by the capture channel before starting this service. */
-        fun setOnProjectionReady(cb: (MediaProjection?) -> Unit) {
+        fun setOnProjectionReady(cb: (MediaProjection?, String?) -> Unit) {
             callback = cb
         }
 

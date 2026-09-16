@@ -48,12 +48,15 @@ class _ScreenShareScreenState extends State<ScreenShareScreen> {
     final ok = await widget.capture.start();
     if (!mounted) return;
     if (!ok) {
+      final detail = widget.capture.lastError ?? 'unknown reason';
+      widget.relay.sendChat('⚠️ Screen share failed to start: $detail');
       setState(() {
         _starting = false;
-        _error = 'Screen capture not available. Please accept the system prompt.';
+        _error = 'Screen capture failed: $detail. Please accept the system prompt and try again.';
       });
       return;
     }
+    widget.relay.sendChat('✅ Screen share started (quality ${widget.capture.quality})');
     widget.capture.poll(onFrame: widget.relay.sendFrame, intervalMs: 260);
     setState(() => _starting = false);
   }

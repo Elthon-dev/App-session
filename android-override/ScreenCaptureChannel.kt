@@ -103,9 +103,9 @@ class ScreenCaptureChannel(
         // Hand off to the foreground service: it creates the MediaProjection
         // AFTER startForeground(), which Android 14+ requires. We configure the
         // capture callback here so the projection arrives thread-safely.
-        ProjectionService.setOnProjectionReady { projection ->
+        ProjectionService.setOnProjectionReady { projection, err ->
             if (projection == null) {
-                pending?.error("failed", "Could not acquire media projection", null)
+                pending?.error("failed", err ?: "Could not acquire media projection", null)
                 return@setOnProjectionReady
             }
             try {
@@ -115,7 +115,7 @@ class ScreenCaptureChannel(
                 pending?.success(true)
             } catch (e: Exception) {
                 stop()
-                pending?.error("failed", "Failed to start screen capture", null)
+                pending?.error("failed", "Failed to start screen capture: ${e.message}", null)
             }
         }
 

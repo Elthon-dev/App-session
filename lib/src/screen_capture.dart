@@ -8,6 +8,7 @@ class ScreenCaptureService extends ChangeNotifier {
   static const MethodChannel _channel = MethodChannel('openbridge/screen');
 
   bool capturing = false;
+  String? lastError;
   String? lastFrame;
   Timer? _timer;
 
@@ -34,9 +35,15 @@ class ScreenCaptureService extends ChangeNotifier {
         'quality': quality,
       });
       capturing = ok == true;
+      lastError = capturing ? null : 'native rejected startCapture';
       notifyListeners();
       return capturing;
-    } catch (_) {
+    } catch (e) {
+      capturing = false;
+      lastError = e is PlatformException
+          ? '${e.code}: ${e.message ?? 'no detail'}'
+          : '$e';
+      notifyListeners();
       return false;
     }
   }
