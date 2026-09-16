@@ -62,6 +62,8 @@ class ScreenCaptureChannel(
     fun register() {
         projectionManager = activity.getSystemService(Service.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
         channel.setMethodCallHandler(this)
+        // Live banner updates as soon as the shell engine connects/disconnects.
+        ShizukuControl.onStateChanged = { notifyShizukuStatus() }
         addShizukuListeners()
         // Eagerly bind at startup if we are already authorized.  This works
         // even when the non-sticky listener never fires because the Shizuku
@@ -112,6 +114,10 @@ class ScreenCaptureChannel(
                     "available" to ShizukuControl.available(),
                     "granted" to ShizukuControl.permissionGranted(),
                     "bound" to ShizukuControl.bound(),
+                    "version" to ShizukuControl.version(),
+                    "stuck" to ShizukuControl.stuckBinding(),
+                    "attempts" to ShizukuControl.bindAttempts(),
+                    "error" to ShizukuControl.lastBindError(),
                 )
             )
         } catch (_: Throwable) {}
@@ -182,6 +188,10 @@ class ScreenCaptureChannel(
                         "available" to ShizukuControl.available(),
                         "granted" to ShizukuControl.permissionGranted(),
                         "bound" to ShizukuControl.bound(),
+                        "version" to ShizukuControl.version(),
+                        "stuck" to ShizukuControl.stuckBinding(),
+                        "attempts" to ShizukuControl.bindAttempts(),
+                        "error" to ShizukuControl.lastBindError(),
                     )
                 )
             }

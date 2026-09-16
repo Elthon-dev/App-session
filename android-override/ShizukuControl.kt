@@ -6,6 +6,8 @@ import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.Parcel
+import android.os.SystemClock
+import android.util.Log
 import rikka.shizuku.Shizuku
 import java.util.ArrayDeque
 
@@ -29,7 +31,13 @@ object ShizukuControl {
 
     @Volatile private var shell: IBinder? = null
     @Volatile private var binding = false
+    @Volatile private var lastBindError: String? = null
+    @Volatile private var lastBindAt = 0L
+    @Volatile private var bindAttempts = 0
     private var args: Shizuku.UserServiceArgs? = null
+
+    /** Invoked whenever shell-connection state changes (for live UI updates). */
+    @Volatile var onStateChanged: (() -> Unit)? = null
 
     // Commands received while the user-service binder is still connecting are
     // queued here and flushed once onServiceConnected fires, so the very first
@@ -40,12 +48,19 @@ object ShizukuControl {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             shell = binder
             binding = false
+            lastBindAt = 0L
+            lastBindError = null
+            Log.i(TAG, "ShellService connected after attempt #$bindAttempts")
             flushPending()
+            onStateChanged?.invoke()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
+            Log.w(TAG, "ShellService disconnected")
             shell = null
             binding = false
+            lastBindAt = 0L
+            onStateChanged?.invoke()
         }
     }
 
@@ -75,8 +90,25 @@ object ShizukuControl {
         false
     }
 
+    /** The Shizuku server API version in use (-1 when unavailable). */
+    fun version(): Int = try {
+        Shizuku.getVersion()
+    } catch (_: Throwable) {
+        -1
+    }
+
     /** True when shell commands will actually run with elevated rights. */
     fun canControl(): Boolean = available() && permissionGranted()
+
+    /** Most recent user-service bind failure reason (or null). */
+    fun lastBindError(): String? = lastBindError
+
+    /** Number of bind attempts made this app run. */
+    fun bindAttempts(): Int = bindAttempts
+
+    /** True when a bind attempt is currently stuck waiting for the binder. */
+    fun stuckBinding(): Boolean = binding && lastBindAt != 0L &&
+        SystemClock.uptimeMillis() - lastBindAt > 3000
 
     /** Ask the user to authorize OpenBridge inside the Shizuku app. */
     fun requestPermission(): Boolean = try {
@@ -86,20 +118,56 @@ object ShizukuControl {
         false
     }
 
+    /**
+     * Version code for the user-service identity. Derived from the APK's
+     * lastUpdateTime, so every fresh install gets a brand-new service key.
+     * Shizuku keeps a cached record per (package, tag, version) and — after a
+     * reinstall/update — a stale record can point at a dead process whose
+     * binder never connects (stuck "warming up"). Changing the version each
+     * install forces Shizuku's server to drop the stale record and spawn fresh.
+     */
+    private fun serviceVersion(context: Context): Int = try {
+        val pi = context.packageManager.getPackageInfo(context.packageName, 0)
+        (pi.lastUpdateTime / 1000L).toInt()
+    } catch (_: Throwable) {
+        1
+    }
+
     /** Bind the shell user-service so commands run as the shell UID. */
     fun bind(context: Context) {
-        if (binding || bound()) return
+        if (bound()) {
+            binding = false
+            return
+        }
+        if (binding) {
+            // A bind that hasn't delivered its binder within 3s is treated as
+            // stuck: force-remove the (possibly stale) service on the Shizuku
+            // server and re-bind instead of deadlocking.
+            if (!stuckBinding()) return
+            Log.w(TAG, "bind stuck after ${bindAttempts} attempts, rebinding fresh")
+            try {
+                if (args != null) Shizuku.unbindUserService(args!!, connection, true)
+            } catch (_: Throwable) {}
+            shell = null
+        }
         binding = true
+        lastBindAt = SystemClock.uptimeMillis()
+        lastBindError = null
+        bindAttempts += 1
         val a = args ?: Shizuku.UserServiceArgs(
             ComponentName(context.packageName, ShellService::class.java.name)
         ).daemon(false)
             .processNameSuffix(ShellService.PROCESS_SUFFIX)
             .tag(ShellService.TAG)
-            .version(ShellService.VERSION)
+            .version(serviceVersion(context))
             .also { args = it }
         try {
             Shizuku.bindUserService(a, connection)
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            lastBindError = e.toString()
+            binding = false
+            lastBindAt = 0L
+            Log.e(TAG, "bindUserService failed: $e")
         }
     }
 

@@ -84,12 +84,20 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!ok) {
       final r = _capture.lastControlResult;
       final mode = r?.$2 ?? 'unknown';
-      final exit = r?.$3;
-      _relay?.sendStatus('Control $action not applied (mode=$mode, exit=$exit).');
+      final exit = r?.$3 ?? -1;
+      final String note;
+      if (exit == -2) {
+        note = 'Control $action queued (engine binding) — will run when connected.';
+      } else if (exit == -1) {
+        note = 'Control $action blocked: Shizuku permission needed.';
+      } else {
+        note = 'Control $action not applied (mode=$mode, exit=$exit).';
+      }
+      _relay?.sendStatus(note);
       if (_relay == null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Control $action failed (mode=$mode, exit=$exit)'),
+            content: Text(note),
             backgroundColor: Nord.surface,
           ),
         );

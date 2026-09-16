@@ -23,6 +23,9 @@ class ShellService : Service() {
 
         const val TRANSACTION_EXEC = 1
         const val TRANSACTION_DESTROY = 2
+
+        // Shizuku's own destroy transaction when the service is removed.
+        const val TRANSACTION_DESTROY_REMOTE = 16777115
     }
 
     override fun onBind(intent: Intent): IBinder {
@@ -51,6 +54,14 @@ class ShellService : Service() {
                         data.enforceInterface(DESCRIPTOR)
                         reply?.writeNoException()
                         stopSelf()
+                        return true
+                    }
+
+                    TRANSACTION_DESTROY_REMOTE -> {
+                        // Shizuku is removing the (possibly stale) user service:
+                        // fully kill our process so the next bind spawns fresh.
+                        stopSelf()
+                        System.exit(0)
                         return true
                     }
                 }

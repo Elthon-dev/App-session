@@ -291,6 +291,9 @@ class _ControlStatusBanner extends StatelessWidget {
     final ready = capture.controlReady;
     final available = capture.shizukuAvailable;
     final bound = capture.shizukuBound;
+    final stuck = capture.shizukuStuck;
+    final attempts = capture.shizukuAttempts;
+    final version = capture.shizukuVersion;
     final Color color;
     final String text;
     IconData icon;
@@ -298,10 +301,14 @@ class _ControlStatusBanner extends StatelessWidget {
       color = Nord.success;
       icon = Icons.touch_app;
       text = 'Control ready — Shizuku active';
+    } else if (stuck || err != null) {
+      color = Nord.error;
+      icon = Icons.error_outline;
+      text = 'Control engine stuck (v$version, attempt $attempts)';
     } else if (ready && !bound) {
       color = Nord.warning;
       icon = Icons.sync_problem;
-      text = 'Control engine warming up…';
+      text = 'Control engine warming up (attempt $attempts)…';
     } else if (available) {
       color = Nord.warning;
       icon = Icons.shield_outlined;

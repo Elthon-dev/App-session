@@ -21,6 +21,21 @@ class ScreenCaptureService extends ChangeNotifier {
   /// The shell user-service binder is connected (control will actually inject).
   bool shizukuBound = false;
 
+  /// Shizuku server API version (0/-1 when unavailable).
+  int shizukuVersion = -1;
+
+  /// True when a bind attempt has not connected for >3s.
+  bool shizukuStuck = false;
+
+  /// Most recent bind failure reason (null when none).
+  String? shizukuError;
+
+  /// Number of bind attempts this app run.
+  int shizukuAttempts = 0;
+
+  /// True when control commands are queued because the shell engine is connecting.
+  bool get warmingUp => (controlReady && !shizukuBound) || shizukuStuck;
+
   /// Notification permission granted (always true before Android 13).
   bool notificationGranted = true;
 
@@ -57,6 +72,10 @@ class ScreenCaptureService extends ChangeNotifier {
       shizukuAvailable = m?['available'] == true;
       shizukuGranted = m?['granted'] == true;
       shizukuBound = m?['bound'] == true;
+      shizukuVersion = (m?['version'] as int?) ?? -1;
+      shizukuStuck = m?['stuck'] == true;
+      shizukuError = m?['error'] as String?;
+      shizukuAttempts = (m?['attempts'] as int?) ?? 0;
       notifyListeners();
     } catch (_) {}
   }
