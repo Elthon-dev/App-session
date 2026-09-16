@@ -10,7 +10,9 @@ import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 
 /**
  * Foreground service with FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION.
@@ -29,25 +31,49 @@ class ProjectionService : Service() {
         ensureNotificationChannel()
         if (!startForegroundSafely()) {
             deliver(null, foregroundError)
+            stopSelf()
             return START_NOT_STICKY
         }
 
         val code = intent?.getIntExtra(EXTRA_CODE, -1) ?: -1
         val data = extractData(intent)
-        var projection: MediaProjection? = null
-        var error: String? = null
-        if (code != -1 && data != null) {
-            val pm =
-                getSystemService(Service.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
-            try {
-                projection = pm?.getMediaProjection(code, data)
-            } catch (e: Exception) {
-                error = e.toString()
-            }
+        if (code == -1 || data == null) {
+            deliver(null, "missing projection extras (code=$code, data=${data != null})")
+            stopSelf()
+            return START_NOT_STICKY
         }
-        deliver(projection, error)
 
-        return START_STICKY
+        val pm =
+            getSystemService(Service.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
+        var error: String? = null
+        fun acquire(): MediaProjection? = try {
+            pm?.getMediaProjection(code, data)
+        } catch (e: Exception) {
+            error = e.toString()
+            null
+        }
+
+        val projection = acquire()
+        if (projection == null && error == null) {
+            // getMediaProjection returned null without throwing — this can be a
+            // transient race right after startForeground(). Retry once before
+            // giving up, and always leave the system clean: a leaked
+            // mediaProjection FGS blocks any subsequent grant (auto-cancel).
+            Handler(Looper.getMainLooper()).postDelayed({
+                val retried = acquire()
+                val msg = if (retried == null && error == null)
+                    "getMediaProjection returned null (code=$code, data=${data != null})"
+                else
+                    null
+                deliver(retried, error ?: msg)
+                if (retried == null) stopSelf()
+            }, 400)
+        } else {
+            deliver(projection, error)
+            if (projection == null) stopSelf()
+        }
+
+        return projection?.let { START_STICKY } ?: START_NOT_STICKY
     }
 
     private fun deliver(projection: MediaProjection?, error: String?) {
