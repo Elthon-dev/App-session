@@ -306,6 +306,14 @@ void _handle(dynamic raw) {
     _push(ChatRole.system, text);
   }
 
+  /// Push a diagnostic line to the phone UI and echo it to the agent host
+  /// so remote failures are visible in the opencode logs.
+  void sendStatus(String text) {
+    if (text.trim().isEmpty) return;
+    _push(ChatRole.system, text);
+    sendRaw({'type': 'status', 'text': text});
+  }
+
   void clearMessages() {
     messages.clear();
     notifyListeners();

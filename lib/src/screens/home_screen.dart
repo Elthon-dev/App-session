@@ -75,12 +75,26 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onRelay() => setState(() {});
 
-  void _onControl(String action, double x, double y, Map<String, dynamic> raw) {
+  Future<void> _onControl(String action, double x, double y, Map<String, dynamic> raw) async {
     final x2 = (raw['x2'] as num?)?.toDouble();
     final y2 = (raw['y2'] as num?)?.toDouble();
     final keyCode = raw['keyCode'] as int?;
     final text = raw['text'] as String?;
-    _capture.executeControl(action, x, y, x2: x2, y2: y2, keyCode: keyCode, text: text);
+    final ok = await _capture.executeControl(action, x, y, x2: x2, y2: y2, keyCode: keyCode, text: text);
+    if (!ok) {
+      final r = _capture.lastControlResult;
+      final mode = r?.$2 ?? 'unknown';
+      final exit = r?.$3;
+      _relay?.sendStatus('Control $action not applied (mode=$mode, exit=$exit).');
+      if (_relay == null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Control $action failed (mode=$mode, exit=$exit)'),
+            backgroundColor: Nord.surface,
+          ),
+        );
+      }
+    }
   }
 
   void _onSessionsChanged() {

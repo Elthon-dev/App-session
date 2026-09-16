@@ -201,6 +201,11 @@ export const PhoneBridgePlugin: Plugin = async ({ client }) => {
           return
         }
 
+        if (data.type === 'status' && data.from === 'phone') {
+          console.log(`[openbridge] status: ${String(data.text || '').slice(0, 300)}`)
+          return
+        }
+
         if (data.type === 'screen' && data.from === 'phone') {
           const base64 = String(data.image || '').split(',')[1] || ''
           if (base64.length > 0) {

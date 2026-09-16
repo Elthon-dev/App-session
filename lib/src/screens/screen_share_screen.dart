@@ -290,13 +290,18 @@ class _ControlStatusBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     final ready = capture.controlReady;
     final available = capture.shizukuAvailable;
+    final bound = capture.shizukuBound;
     final Color color;
     final String text;
     IconData icon;
-    if (ready) {
+    if (ready && bound) {
       color = Nord.success;
       icon = Icons.touch_app;
       text = 'Control ready — Shizuku active';
+    } else if (ready && !bound) {
+      color = Nord.warning;
+      icon = Icons.sync_problem;
+      text = 'Control engine warming up…';
     } else if (available) {
       color = Nord.warning;
       icon = Icons.shield_outlined;

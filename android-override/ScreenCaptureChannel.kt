@@ -63,13 +63,22 @@ class ScreenCaptureChannel(
         projectionManager = activity.getSystemService(Service.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
         channel.setMethodCallHandler(this)
         addShizukuListeners()
+        // Eagerly bind at startup if we are already authorized.  This works
+        // even when the non-sticky listener never fires because the Shizuku
+        // binder was connected before this activity registered.
+        try {
+            if (ShizukuControl.canControl()) ShizukuControl.bind(activity)
+        } catch (_: Throwable) {}
+        notifyShizukuStatus()
     }
 
     private fun addShizukuListeners() {
         if (shizukuListenersAdded) return
         shizukuListenersAdded = true
         try {
-            Shizuku.addBinderReceivedListener(binderListener)
+            // Sticky variant immediately calls back if the Shizuku binder is
+            // already available (the common case at app launch).
+            Shizuku.addBinderReceivedListenerSticky(binderListener)
             Shizuku.addBinderDeadListener(binderListener)
             Shizuku.addRequestPermissionResultListener(permissionListener)
         } catch (_: Throwable) {}
@@ -102,6 +111,7 @@ class ScreenCaptureChannel(
                 mapOf(
                     "available" to ShizukuControl.available(),
                     "granted" to ShizukuControl.permissionGranted(),
+                    "bound" to ShizukuControl.bound(),
                 )
             )
         } catch (_: Throwable) {}
@@ -171,6 +181,7 @@ class ScreenCaptureChannel(
                     mapOf(
                         "available" to ShizukuControl.available(),
                         "granted" to ShizukuControl.permissionGranted(),
+                        "bound" to ShizukuControl.bound(),
                     )
                 )
             }
@@ -184,6 +195,7 @@ class ScreenCaptureChannel(
                         "battery" to batteryExempt(),
                         "shizukuAvailable" to ShizukuControl.available(),
                         "shizukuGranted" to ShizukuControl.permissionGranted(),
+                        "shizukuBound" to ShizukuControl.bound(),
                     )
                 )
             }
@@ -216,26 +228,41 @@ class ScreenCaptureChannel(
                             "input swipe $px $py $px2 $py2 300"
                         }
                         "key" -> "input keyevent ${call.argument<Int>("keyCode") ?: 4}"
-                        "text" -> "input text '${call.argument<String>("text") ?: ""}'"
+                        "text" -> {
+                            val safe = (call.argument<String>("text") ?: "")
+                                .replace("'", "'\\''")
+                            "input text '$safe'"
+                        }
                         else -> null
                     }
                     if (cmd == null) {
-                        result.success(false)
+                        result.success(mapOf("ok" to false, "exit" to -1, "mode" to "unknown"))
                         return
                     }
+                    val mode: String
+                    val exit: Int
                     if (ShizukuControl.canControl()) {
-                        ShizukuControl.execute(activity, cmd)
+                        mode = "shizuku"
+                        exit = ShizukuControl.execute(activity, cmd)
                     } else {
-                        try {
-                            Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                        mode = "app"
+                        exit = try {
+                            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                            p.waitFor()
+                            p.exitValue()
                         } catch (_: Exception) {
-                            result.success(false)
-                            return
+                            -1
                         }
                     }
-                    result.success(true)
+                    result.success(
+                        mapOf(
+                            "ok" to (exit == ShizukuControl.RESULT_OK),
+                            "exit" to exit,
+                            "mode" to mode,
+                        )
+                    )
                 } catch (_: Exception) {
-                    result.success(false)
+                    result.success(mapOf("ok" to false, "exit" to -1, "mode" to "error"))
                 }
             }
             else -> result.notImplemented()

@@ -18,6 +18,9 @@ class ScreenCaptureService extends ChangeNotifier {
   /// OpenBridge is authorized inside the Shizuku app.
   bool shizukuGranted = false;
 
+  /// The shell user-service binder is connected (control will actually inject).
+  bool shizukuBound = false;
+
   /// Notification permission granted (always true before Android 13).
   bool notificationGranted = true;
 
@@ -53,6 +56,7 @@ class ScreenCaptureService extends ChangeNotifier {
       final m = await _channel.invokeMethod<Map<Object?, Object?>>('shizukuStatus');
       shizukuAvailable = m?['available'] == true;
       shizukuGranted = m?['granted'] == true;
+      shizukuBound = m?['bound'] == true;
       notifyListeners();
     } catch (_) {}
   }
@@ -65,6 +69,7 @@ class ScreenCaptureService extends ChangeNotifier {
       batteryExempt = m?['battery'] == true;
       shizukuAvailable = m?['shizukuAvailable'] == true;
       shizukuGranted = m?['shizukuGranted'] == true;
+      shizukuBound = m?['shizukuBound'] == true;
       notifyListeners();
     } catch (_) {}
   }
@@ -100,9 +105,11 @@ class ScreenCaptureService extends ChangeNotifier {
   }
 
   /// Execute a screen control action (tap, swipe, key, text) via shell.
+  ///
+  /// Returns true only when the injected command exited successfully.
   Future<bool> executeControl(String action, double x, double y, {double? x2, double? y2, int? keyCode, String? text}) async {
     try {
-      final ok = await _channel.invokeMethod<bool>('executeControl', {
+      final r = await _channel.invokeMethod<dynamic>('executeControl', {
         'action': action,
         'x': x,
         'y': y,
@@ -111,11 +118,18 @@ class ScreenCaptureService extends ChangeNotifier {
         if (keyCode != null) 'keyCode': keyCode,
         if (text != null) 'text': text,
       });
-      return ok == true;
+      if (r is Map) {
+        lastControlResult = (r['ok'] == true, r['mode'] as String?, r['exit'] as int?);
+        return r['ok'] == true;
+      }
+      return r == true;
     } catch (_) {
       return false;
     }
   }
+
+  /// Most recent native control result: (ok, mode, exit code).
+  (bool, String?, int?)? lastControlResult;
 
   Future<bool> start() async {
     try {

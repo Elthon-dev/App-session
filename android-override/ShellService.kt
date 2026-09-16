@@ -32,14 +32,18 @@ class ShellService : Service() {
                     TRANSACTION_EXEC -> {
                         data.enforceInterface(DESCRIPTOR)
                         val cmd = data.readString() ?: ""
-                        Thread {
-                            try {
-                                val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-                                p.waitFor()
-                            } catch (_: Throwable) {
-                            }
-                        }.start()
+                        // Runs synchronously on the binder thread; `input` is
+                        // fast, and the real exit code lets the client report
+                        // truthful success to Dart.
+                        val exit = try {
+                            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                            p.waitFor()
+                            p.exitValue()
+                        } catch (_: Throwable) {
+                            -1
+                        }
                         reply?.writeNoException()
+                        reply?.writeInt(exit)
                         return true
                     }
 

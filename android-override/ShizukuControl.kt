@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.IBinder
 import android.os.Parcel
 import rikka.shizuku.Shizuku
+import java.util.ArrayDeque
 
 /**
  * Provides shell-level input control (tap / swipe / keyevent / text) through
@@ -21,16 +22,30 @@ object ShizukuControl {
     const val REQUEST_CODE = 4242
     const val TAG = "OpenBridgeShizuku"
 
+    const val RESULT_OK = 0
+    const val RESULT_WAIT_BIND = -2
+    const val RESULT_NO_PERMISSION = -1
+    const val RESULT_TRANSACT_FAILED = -3
+
     @Volatile private var shell: IBinder? = null
+    @Volatile private var binding = false
     private var args: Shizuku.UserServiceArgs? = null
+
+    // Commands received while the user-service binder is still connecting are
+    // queued here and flushed once onServiceConnected fires, so the very first
+    // control command is never silently dropped.
+    private val pendingCommands = ArrayDeque<String>()
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             shell = binder
+            binding = false
+            flushPending()
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             shell = null
+            binding = false
         }
     }
 
@@ -53,6 +68,13 @@ object ShizukuControl {
         false
     }
 
+    /** The shell user-service binder is currently connected and alive. */
+    fun bound(): Boolean = try {
+        shell?.pingBinder() == true
+    } catch (_: Throwable) {
+        false
+    }
+
     /** True when shell commands will actually run with elevated rights. */
     fun canControl(): Boolean = available() && permissionGranted()
 
@@ -66,6 +88,8 @@ object ShizukuControl {
 
     /** Bind the shell user-service so commands run as the shell UID. */
     fun bind(context: Context) {
+        if (binding || bound()) return
+        binding = true
         val a = args ?: Shizuku.UserServiceArgs(
             ComponentName(context.packageName, ShellService::class.java.name)
         ).daemon(false)
@@ -75,34 +99,59 @@ object ShizukuControl {
             .also { args = it }
         try {
             Shizuku.bindUserService(a, connection)
-        } catch (_: Throwable) {}
+        } catch (_: Throwable) {
+        }
     }
 
-    /** Fire-and-forget execution of a shell command via the shell process. */
-    fun execute(context: Context, cmd: String) {
-        if (!canControl()) return
+    /**
+     * Execute a shell command via the shell process. Never drops commands: if
+     * the binder is still connecting, the command is queued and runs right
+     * after onServiceConnected. Returns the shell exit code (0 = success).
+     */
+    fun execute(context: Context, cmd: String): Int {
+        if (!canControl()) return RESULT_NO_PERMISSION
         val shellBinder = shell
-        if (shellBinder == null) {
-            bind(context)
-            return
-        }
-        Thread {
-            var data: Parcel? = null
-            var reply: Parcel? = null
-            try {
-                data = Parcel.obtain()
-                reply = Parcel.obtain()
-                data.writeInterfaceToken(ShellService.DESCRIPTOR)
-                data.writeString(cmd)
-                shellBinder.transact(ShellService.TRANSACTION_EXEC, data, reply, 0)
-                reply.readException()
-            } catch (_: Throwable) {
-            } finally {
-                try {
-                    reply?.recycle()
-                    data?.recycle()
-                } catch (_: Throwable) {}
+        if (shellBinder == null || !shellBinder.pingBinder()) {
+            synchronized(pendingCommands) {
+                pendingCommands.addLast(cmd)
             }
-        }.start()
+            bind(context)
+            return RESULT_WAIT_BIND
+        }
+        return transact(shellBinder, cmd)
+    }
+
+    private fun transact(binder: IBinder, cmd: String): Int {
+        var data: Parcel? = null
+        var reply: Parcel? = null
+        return try {
+            data = Parcel.obtain()
+            reply = Parcel.obtain()
+            data.writeInterfaceToken(ShellService.DESCRIPTOR)
+            data.writeString(cmd)
+            binder.transact(ShellService.TRANSACTION_EXEC, data, reply, 0)
+            reply.readException()
+            reply.readInt()
+        } catch (_: Throwable) {
+            RESULT_TRANSACT_FAILED
+        } finally {
+            try {
+                reply?.recycle()
+                data?.recycle()
+            } catch (_: Throwable) {}
+        }
+    }
+
+    private fun flushPending() {
+        val cmds = synchronized(pendingCommands) {
+            if (pendingCommands.isEmpty()) return
+            val list = ArrayList<String>(pendingCommands.size)
+            while (pendingCommands.isNotEmpty()) list.add(pendingCommands.removeFirst())
+            list
+        }
+        for (cmd in cmds) {
+            val b = shell ?: return
+            transact(b, cmd)
+        }
     }
 }
