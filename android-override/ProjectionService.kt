@@ -35,10 +35,13 @@ class ProjectionService : Service() {
             return START_NOT_STICKY
         }
 
-        val code = intent?.getIntExtra(EXTRA_CODE, -1) ?: -1
+        val hasCode = intent?.hasExtra(EXTRA_CODE) == true
+        val code = if (hasCode) intent!!.getIntExtra(EXTRA_CODE, -1) else -1
         val data = extractData(intent)
-        if (code == -1 || data == null) {
-            deliver(null, "missing projection extras (code=$code, data=${data != null})")
+        // NOTE: RESULT_OK == -1 on Android, so presence must be checked via
+        // hasExtra(), never by comparing against a -1 sentinel.
+        if (!hasCode || data == null) {
+            deliver(null, "missing projection extras (code=$code, hasCode=$hasCode, data=${data != null})")
             stopSelf()
             return START_NOT_STICKY
         }
