@@ -40,6 +40,10 @@ jobs:
           cp android-override/ShellService.kt android/app/src/main/kotlin/com/elthondev/openbridge/ShellService.kt
           cp android-override/ControlAccessibilityService.kt android/app/src/main/kotlin/com/elthondev/openbridge/ControlAccessibilityService.kt
           cp -r android-override/res/. android/app/src/main/res/
+          mkdir -p android/app/src/main/res/xml android/app/src/main/res/values android/app/src/main/res/drawable
+          cp android-override/ic_stat_openbridge.xml android/app/src/main/res/drawable/ic_stat_openbridge.xml
+          cp android-override/accessibility_service_config.xml android/app/src/main/res/xml/accessibility_service_config.xml
+          cp android-override/strings.xml android/app/src/main/res/values/strings.xml
 
       - name: Inject Shizuku dependencies
         run: |

@@ -349,8 +349,8 @@ class ScreenCaptureChannel(
                     "longPress", "long_press", "long" -> ControlAccessibilityService.longPress(px.toFloat(), py.toFloat(), duration.coerceAtLeast(700L))
                     "swipe" -> ControlAccessibilityService.swipe(px.toFloat(), py.toFloat(), px2.toFloat(), py2.toFloat(), duration)
                     "scroll" -> ControlAccessibilityService.swipe(
-                        (0.5 * w).toFloat(), (if (direction == "up") 0.7 else 0.3) * h,
-                        (0.5 * w).toFloat(), (if (direction == "up") 0.3 else 0.7) * h,
+                        (0.5 * w).toFloat(), ((if (direction == "up") 0.7 else 0.3) * h).toFloat(),
+                        (0.5 * w).toFloat(), ((if (direction == "up") 0.3 else 0.7) * h).toFloat(),
                         250
                     )
                     "key" -> handleGlobalKey(keyCode, keyName)
