@@ -3,6 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   apk:
@@ -30,7 +31,7 @@ jobs:
 
       - name: Apply OpenBridge native code
         run: |
-          mkdir -p android/app/src/main/res/drawable android/app/src/main/kotlin/com/elthondev/openbridge
+          mkdir -p android/app/src/main/res android/app/src/main/kotlin/com/elthondev/openbridge
           cp android-override/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
           cp android-override/MainActivity.kt android/app/src/main/kotlin/com/elthondev/openbridge/MainActivity.kt
           cp android-override/ScreenCaptureChannel.kt android/app/src/main/kotlin/com/elthondev/openbridge/ScreenCaptureChannel.kt
@@ -38,10 +39,7 @@ jobs:
           cp android-override/ShizukuControl.kt android/app/src/main/kotlin/com/elthondev/openbridge/ShizukuControl.kt
           cp android-override/ShellService.kt android/app/src/main/kotlin/com/elthondev/openbridge/ShellService.kt
           cp android-override/ControlAccessibilityService.kt android/app/src/main/kotlin/com/elthondev/openbridge/ControlAccessibilityService.kt
-          cp android-override/ic_stat_openbridge.xml android/app/src/main/res/drawable/ic_stat_openbridge.xml
-          mkdir -p android/app/src/main/res/xml android/app/src/main/res/values
-          cp android-override/accessibility_service_config.xml android/app/src/main/res/xml/accessibility_service_config.xml
-          cp android-override/strings.xml android/app/src/main/res/values/strings.xml
+          cp -r android-override/res/. android/app/src/main/res/
 
       - name: Inject Shizuku dependencies
         run: |

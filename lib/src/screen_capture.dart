@@ -3,7 +3,92 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Talks to the native Kotlin MediaProjection handler over MethodChannel.
+/// Result of a device-control action, including which backend executed it.
+class ControlResult {
+  const ControlResult({
+    required this.ok,
+    this.mode,
+    this.exit,
+    this.detail,
+  });
+
+  final bool ok;
+  final String? mode;
+  final int? exit;
+  final String? detail;
+
+  factory ControlResult.from(dynamic r) {
+    if (r is Map) {
+      return ControlResult(
+        ok: r['ok'] == true,
+        mode: r['mode'] as String?,
+        exit: (r['exit'] as num?)?.toInt(),
+        detail: r['detail'] as String?,
+      );
+    }
+    return ControlResult(ok: r == true);
+  }
+}
+
+/// An installed, launchable app on the device.
+class InstalledApp {
+  const InstalledApp({required this.package, required this.label, required this.launchable});
+
+  final String package;
+  final String label;
+  final bool launchable;
+
+  factory InstalledApp.fromJson(Map<Object?, Object?> j) => InstalledApp(
+        package: j['package'] as String? ?? '',
+        label: j['label'] as String? ?? '',
+        launchable: j['launchable'] == true,
+      );
+
+  String get initial {
+    final l = label.trim();
+    return l.isEmpty ? '?' : l.characters.first.toUpperCase();
+  }
+}
+
+/// One audio stream's level snapshot.
+class AudioStream {
+  const AudioStream({required this.level, required this.max, required this.muted});
+
+  final int level;
+  final int max;
+  final bool muted;
+
+  factory AudioStream.fromJson(dynamic j) {
+    if (j is Map) {
+      return AudioStream(
+        level: (j['level'] as num?)?.toInt() ?? 0,
+        max: (j['max'] as num?)?.toInt() ?? 1,
+        muted: j['muted'] == true,
+      );
+    }
+    return const AudioStream(level: 0, max: 1, muted: false);
+  }
+
+  double get fraction => max <= 0 ? 0 : level / max;
+}
+
+class AudioState {
+  const AudioState({required this.streams});
+
+  final Map<String, AudioStream> streams;
+
+  AudioStream? operator [](String name) => streams[name];
+
+  factory AudioState.fromJson(Map<Object?, Object?> j) => AudioState(
+        streams: {
+          for (final key in const ['music', 'ring', 'alarm', 'notification', 'system'])
+            if (j[key] != null) key: AudioStream.fromJson(j[key]),
+        },
+      );
+}
+
+/// Talks to the native Kotlin bridge over MethodChannel: screen capture,
+/// device control, app list, audio and brightness.
 class ScreenCaptureService extends ChangeNotifier {
   static const MethodChannel _channel = MethodChannel('openbridge/screen');
 
@@ -42,6 +127,9 @@ class ScreenCaptureService extends ChangeNotifier {
   /// App is exempt from battery optimizations.
   bool batteryExempt = false;
 
+  /// Android WRITE_SETTINGS granted (needed for system brightness).
+  bool writeSettings = false;
+
   /// OpenBridge AccessibilityService is enabled (no-Shizuku control backend).
   bool accessibilityEnabled = false;
 
@@ -50,6 +138,22 @@ class ScreenCaptureService extends ChangeNotifier {
 
   /// True when any control backend can inject input.
   bool get controlReady => accessibilityEnabled || (shizukuAvailable && shizukuGranted);
+
+  /// Human label for the active control backend.
+  String get backendLabel {
+    if (shizukuBound) return 'Shizuku';
+    if (accessibilityEnabled) return 'Accessibility';
+    if (shizukuReady) return 'Shizuku (warming up)';
+    if (shizukuAvailable) return 'Shizuku (permission needed)';
+    return 'No backend';
+  }
+
+  /// Cached installed apps for the launcher.
+  List<InstalledApp> apps = [];
+  bool appsLoaded = false;
+
+  /// Last known audio state.
+  AudioState? audio;
 
   /// Longest side in px for scaled preview frames.
   int maxSide = 720;
@@ -96,6 +200,7 @@ class ScreenCaptureService extends ChangeNotifier {
       shizukuGranted = m?['shizukuGranted'] == true;
       shizukuBound = m?['shizukuBound'] == true;
       accessibilityEnabled = m?['accessibility'] == true;
+      writeSettings = m?['writeSettings'] == true;
       notifyListeners();
     } catch (_) {}
   }
@@ -130,6 +235,16 @@ class ScreenCaptureService extends ChangeNotifier {
     }
   }
 
+  /// Open the WRITE_SETTINGS grant screen (system brightness control).
+  Future<bool> openWriteSettings() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('openWriteSettings');
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Refresh just the AccessibilityService enabled state.
   Future<void> refreshAccessibility() async {
     try {
@@ -149,32 +264,153 @@ class ScreenCaptureService extends ChangeNotifier {
     }
   }
 
-  /// Execute a screen control action (tap, swipe, key, text) via shell.
+  /// Execute a device-control action on the phone itself.
   ///
-  /// Returns true only when the injected command exited successfully.
-  Future<bool> executeControl(String action, double x, double y, {double? x2, double? y2, int? keyCode, String? text}) async {
+  /// [action] is one of: tap, doubleTap, longPress, swipe, scroll, key, text,
+  /// clearText, launch, url, back, home, recents, notifications, quickSettings,
+  /// powerDialog, lock, split, wake, sleep, volume.
+  Future<ControlResult> control(String action, {Map<String, dynamic> params = const {}}) async {
     try {
       final r = await _channel.invokeMethod<dynamic>('executeControl', {
         'action': action,
-        'x': x,
-        'y': y,
-        if (x2 != null) 'x2': x2,
-        if (y2 != null) 'y2': y2,
-        if (keyCode != null) 'keyCode': keyCode,
-        if (text != null) 'text': text,
+        ...params,
       });
-      if (r is Map) {
-        lastControlResult = (r['ok'] == true, r['mode'] as String?, r['exit'] as int?);
-        return r['ok'] == true;
-      }
-      return r == true;
-    } catch (_) {
-      return false;
+      final res = ControlResult.from(r);
+      lastControlResult = res;
+      return res;
+    } catch (e) {
+      return ControlResult(ok: false, mode: 'error', detail: '$e');
     }
   }
 
-  /// Most recent native control result: (ok, mode, exit code).
-  (bool, String?, int?)? lastControlResult;
+  /// Backwards-compatible tap/swipe/key/text entry point.
+  Future<bool> executeControl(
+    String action,
+    double x,
+    double y, {
+    double? x2,
+    double? y2,
+    int? keyCode,
+    String? text,
+  }) async {
+    final res = await control(action, params: {
+      'x': x,
+      'y': y,
+      if (x2 != null) 'x2': x2,
+      if (y2 != null) 'y2': y2,
+      if (keyCode != null) 'keyCode': keyCode,
+      if (text != null) 'text': text,
+    });
+    return res.ok;
+  }
+
+  /// Convenience: inject a tap at normalised (0..1) coordinates.
+  Future<ControlResult> tapAt(double x, double y) => control('tap', params: {'x': x, 'y': y});
+
+  /// Convenience: inject a swipe between two normalised points.
+  Future<ControlResult> swipeAt(double x, double y, double x2, double y2, {int duration = 300}) =>
+      control('swipe', params: {'x': x, 'y': y, 'x2': x2, 'y2': y2, 'duration': duration});
+
+  /// Long-press at normalised coordinates.
+  Future<ControlResult> longPressAt(double x, double y, {int duration = 800}) =>
+      control('longPress', params: {'x': x, 'y': y, 'duration': duration});
+
+  /// Double-tap at normalised coordinates.
+  Future<ControlResult> doubleTapAt(double x, double y) => control('doubleTap', params: {'x': x, 'y': y});
+
+  /// Launch an installed app by package name.
+  Future<ControlResult> launchApp(String package) => control('launch', params: {'package': package});
+
+  /// Open a URL.
+  Future<ControlResult> openUrl(String url) => control('url', params: {'url': url});
+
+  /// Send a recognised global navigation action.
+  Future<ControlResult> global(String action) => control(action);
+
+  /// Type [text] into the currently focused field.
+  Future<ControlResult> typeText(String text) => control('text', params: {'text': text});
+
+  /// Load the installed-app list (cached after first call unless [force]).
+  Future<List<InstalledApp>> loadApps({bool force = false}) async {
+    if (appsLoaded && !force) return apps;
+    try {
+      final list = await _channel.invokeMethod<List<Object?>>('listApps');
+      apps = (list ?? const [])
+          .whereType<Map<Object?, Object?>>()
+          .map(InstalledApp.fromJson)
+          .where((a) => a.package.isNotEmpty)
+          .toList();
+      appsLoaded = true;
+      notifyListeners();
+    } catch (_) {}
+    return apps;
+  }
+
+  /// Read current audio levels.
+  Future<AudioState?> refreshAudio() async {
+    try {
+      final m = await _channel.invokeMethod<Map<Object?, Object?>>('getAudio');
+      if (m == null) return audio;
+      audio = AudioState.fromJson(m);
+      notifyListeners();
+      return audio;
+    } catch (_) {
+      return audio;
+    }
+  }
+
+  /// Change an audio stream: op = set|up|down|mute|unmute.
+  Future<AudioStream?> setAudio(String stream, {String op = 'set', int? level}) async {
+    try {
+      final m = await _channel.invokeMethod<Map<Object?, Object?>>('setAudio', {
+        'stream': stream,
+        'op': op,
+        if (level != null) 'level': level,
+      });
+      final s = AudioStream.fromJson(m);
+      final next = Map<String, AudioStream>.from(audio?.streams ?? const {});
+      next[stream] = s;
+      audio = AudioState(streams: next);
+      notifyListeners();
+      return s;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Current system brightness 0..255 (or -1 when unavailable).
+  Future<int> getBrightness() async {
+    try {
+      final m = await _channel.invokeMethod<Map<Object?, Object?>>('getBrightness');
+      return (m?['system'] as num?)?.toInt() ?? -1;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  /// Set brightness 0..255. Returns the backend that handled it.
+  Future<ControlResult> setBrightness(int level) async {
+    try {
+      final r = await _channel.invokeMethod<dynamic>('setBrightness', {'level': level});
+      return ControlResult.from(r);
+    } catch (e) {
+      return ControlResult(ok: false, mode: 'error', detail: '$e');
+    }
+  }
+
+  /// Device/screen information for the control header.
+  Future<Map<String, dynamic>> screenInfo() async {
+    try {
+      final m = await _channel.invokeMethod<Map<Object?, Object?>>('screenInfo');
+      if (m == null) return const {};
+      return m.map((key, value) => MapEntry('$key', value));
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Most recent control result.
+  ControlResult? lastControlResult;
 
   Future<bool> start() async {
     try {
@@ -188,9 +424,7 @@ class ScreenCaptureService extends ChangeNotifier {
       return capturing;
     } catch (e) {
       capturing = false;
-      lastError = e is PlatformException
-          ? '${e.code}: ${e.message ?? 'no detail'}'
-          : '$e';
+      lastError = e is PlatformException ? '${e.code}: ${e.message ?? 'no detail'}' : '$e';
       notifyListeners();
       return false;
     }

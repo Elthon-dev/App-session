@@ -2,22 +2,25 @@ package com.elthondev.openbridge
 
 import android.app.Activity
 import android.app.Service
-import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.AudioManager
 import android.media.Image
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.PowerManager
+import android.provider.Settings
 import android.util.Base64
+import android.view.WindowManager
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -26,9 +29,16 @@ import java.io.ByteArrayOutputStream
 import kotlin.math.max
 
 /**
- * Bridges MediaProjection screen capture to Dart over the `openbridge/screen`
- * MethodChannel. Frames are captured on a dedicated HandlerThread, scaled to a
- * max side, JPEG-compressed and returned as base64 data URLs on demand.
+ * Bridges MediaProjection screen capture *and* on-device device control to Dart
+ * over the `openbridge/screen` MethodChannel.
+ *
+ * Frames are captured on a dedicated HandlerThread, scaled to a max side,
+ * JPEG-compressed and returned as base64 data URLs on demand.
+ *
+ * Control commands are injected through whichever backend is able to run:
+ *  1. AccessibilityService  — no root/Shizuku, handles gestures + global actions
+ *  2. Shizuku shell         — `input ...`, `am ...`, `settings ...`
+ *  3. App APIs              — intents for launching apps / opening URLs
  */
 class ScreenCaptureChannel(
     private val engine: FlutterEngine,
@@ -39,6 +49,7 @@ class ScreenCaptureChannel(
         const val CHANNEL = "openbridge/screen"
         const val REQUEST_CAPTURE = 92451
         const val REQUEST_NOTIFICATION_PERMISSION = 92452
+        const val REQUEST_WRITE_SETTINGS = 92453
     }
 
     private val channel = MethodChannel(engine.dartExecutor.binaryMessenger, CHANNEL)
@@ -125,7 +136,7 @@ class ScreenCaptureChannel(
     }
 
     private fun notificationGranted(): Boolean {
-        if (android.os.Build.VERSION.SDK_INT < 33) return true
+        if (Build.VERSION.SDK_INT < 33) return true
         return try {
             activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) ==
                 PackageManager.PERMISSION_GRANTED
@@ -141,6 +152,12 @@ class ScreenCaptureChannel(
         } catch (_: Throwable) {
             false
         }
+    }
+
+    private fun canWriteSettings(): Boolean = try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.System.canWrite(activity) else true
+    } catch (_: Throwable) {
+        false
     }
 
     /** Forwarded from MainActivity for runtime-permission callbacks. */
@@ -175,8 +192,8 @@ class ScreenCaptureChannel(
             "isCapturing" -> result.success(started)
             "requestBatteryBypass" -> {
                 try {
-                    val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                    intent.data = android.net.Uri.parse("package:${activity.packageName}")
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    intent.data = Uri.parse("package:${activity.packageName}")
                     activity.startActivity(intent)
                     result.success(true)
                 } catch (_: Exception) {
@@ -208,11 +225,12 @@ class ScreenCaptureChannel(
                         "shizukuGranted" to ShizukuControl.permissionGranted(),
                         "shizukuBound" to ShizukuControl.bound(),
                         "accessibility" to ControlAccessibilityService.connected(),
+                        "writeSettings" to canWriteSettings(),
                     )
                 )
             }
             "requestNotificationPermission" -> {
-                if (!notificationGranted() && android.os.Build.VERSION.SDK_INT >= 33) {
+                if (!notificationGranted() && Build.VERSION.SDK_INT >= 33) {
                     try {
                         activity.requestPermissions(
                             arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
@@ -222,90 +240,12 @@ class ScreenCaptureChannel(
                 }
                 result.success(true)
             }
-            "executeControl" -> {
-                val action = call.argument<String>("action") ?: ""
-                val x = call.argument<Number>("x")?.toDouble() ?: 0.5
-                val y = call.argument<Number>("y")?.toDouble() ?: 0.5
-                val x2 = call.argument<Number>("x2")?.toDouble()
-                val y2 = call.argument<Number>("y2")?.toDouble()
-                val metrics = activity.resources.displayMetrics
-                val px = (x * metrics.widthPixels).toInt()
-                val py = (y * metrics.heightPixels).toInt()
-                val px2 = ((x2 ?: x) * metrics.widthPixels).toInt()
-                val py2 = ((y2 ?: y) * metrics.heightPixels).toInt()
-                val keyCode = call.argument<Int>("keyCode") ?: 4
-                val text = call.argument<String>("text") ?: ""
-                try {
-                    // Accessibility first: needs no Shizuku/root and works on
-                    // devices (e.g. MediaTek) where Shizuku user services or
-                    // shell injection are unavailable.
-                    if (ControlAccessibilityService.connected()) {
-                        val done = when (action) {
-                            "tap" -> ControlAccessibilityService.tap(px.toFloat(), py.toFloat())
-                            "swipe" -> ControlAccessibilityService.swipe(
-                                px.toFloat(), py.toFloat(), px2.toFloat(), py2.toFloat(), 300
-                            )
-                            "key" -> when (keyCode) {
-                                4 -> ControlAccessibilityService.global(ControlAccessibilityService.GLOBAL_BACK)
-                                3 -> ControlAccessibilityService.global(ControlAccessibilityService.GLOBAL_HOME)
-                                187 -> ControlAccessibilityService.global(ControlAccessibilityService.GLOBAL_RECENTS)
-                                else -> false
-                            }
-                            "text" -> ControlAccessibilityService.setText(text)
-                            else -> false
-                        }
-                        if (done) {
-                            result.success(mapOf("ok" to true, "exit" to 0, "mode" to "accessibility"))
-                            return
-                        }
-                    }
-
-                    val cmd = when (action) {
-                        "tap" -> "input tap $px $py"
-                        "swipe" -> "input swipe $px $py $px2 $py2 300"
-                        "key" -> "input keyevent $keyCode"
-                        "text" -> {
-                            val safe = text.replace("'", "'\\''")
-                            "input text '$safe'"
-                        }
-                        else -> null
-                    }
-                    if (cmd == null) {
-                        result.success(mapOf("ok" to false, "exit" to -1, "mode" to "unknown"))
-                        return
-                    }
-                    val mode: String
-                    val exit: Int
-                    if (ShizukuControl.canControl()) {
-                        mode = "shizuku"
-                        exit = ShizukuControl.execute(activity, cmd)
-                    } else {
-                        mode = "app"
-                        exit = try {
-                            val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
-                            p.waitFor()
-                            p.exitValue()
-                        } catch (_: Exception) {
-                            -1
-                        }
-                    }
-                    result.success(
-                        mapOf(
-                            "ok" to (exit == ShizukuControl.RESULT_OK),
-                            "exit" to exit,
-                            "mode" to mode,
-                        )
-                    )
-                } catch (_: Exception) {
-                    result.success(mapOf("ok" to false, "exit" to -1, "mode" to "error"))
-                }
-            }
             "accessibilityStatus" -> {
                 result.success(mapOf("enabled" to ControlAccessibilityService.connected()))
             }
             "openAccessibilitySettings" -> {
                 result.success(try {
-                    val intent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     activity.startActivity(intent)
                     true
@@ -313,9 +253,412 @@ class ScreenCaptureChannel(
                     false
                 })
             }
+            "openWriteSettings" -> {
+                result.success(try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)
+                        intent.data = Uri.parse("package:${activity.packageName}")
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        activity.startActivity(intent)
+                    }
+                    true
+                } catch (_: Exception) {
+                    false
+                })
+            }
+            "executeControl" -> executeControl(call, result)
+            "listApps" -> result.success(listApps())
+            "getAudio" -> result.success(getAudio())
+            "setAudio" -> setAudio(call, result)
+            "getBrightness" -> result.success(getBrightness())
+            "setBrightness" -> setBrightness(call, result)
+            "screenInfo" -> result.success(screenInfo())
             else -> result.notImplemented()
         }
     }
+
+    // ---------------------------------------------------------------------
+    // Control injection
+    // ---------------------------------------------------------------------
+
+    private fun executeControl(call: MethodCall, result: MethodChannel.Result) {
+        val action = call.argument<String>("action") ?: ""
+        val x = call.argument<Number>("x")?.toDouble() ?: 0.5
+        val y = call.argument<Number>("y")?.toDouble() ?: 0.5
+        val x2 = call.argument<Number>("x2")?.toDouble()
+        val y2 = call.argument<Number>("y2")?.toDouble()
+        val duration = (call.argument<Number>("duration")?.toLong() ?: 300L)
+        val keyCode = call.argument<Int>("keyCode")
+        val keyName = call.argument<String>("key")
+        val text = call.argument<String>("text") ?: ""
+        val pkg = call.argument<String>("package") ?: ""
+        val url = call.argument<String>("url") ?: ""
+        val direction = call.argument<String>("direction") ?: "down"
+        val stream = call.argument<String>("stream") ?: "music"
+        val level = call.argument<Int>("level")
+
+        val metrics = activity.resources.displayMetrics
+        val w = metrics.widthPixels
+        val h = metrics.heightPixels
+        val px = (x * w).toInt()
+        val py = (y * h).toInt()
+        val px2 = ((x2 ?: x) * w).toInt()
+        val py2 = ((y2 ?: y) * h).toInt()
+
+        try {
+            // ---- App-side actions (no elevation required) ----------------
+            when (action) {
+                "launch" -> {
+                    result.success(launchApp(pkg))
+                    return
+                }
+                "url", "open" -> {
+                    result.success(openUrl(url))
+                    return
+                }
+                "volume" -> {
+                    val r = applyAudio(stream, level, direction)
+                    result.success(r)
+                    return
+                }
+                "wake" -> {
+                    keepScreenOn(true)
+                    val exit = if (ShizukuControl.canControl()) {
+                        ShizukuControl.execute(activity, "input keyevent 224")
+                    } else -1
+                    result.success(mapOf("ok" to true, "exit" to exit, "mode" to if (exit == 0) "shizuku" else "app"))
+                    return
+                }
+                "sleep" -> {
+                    keepScreenOn(false)
+                    if (ShizukuControl.canControl()) {
+                        val exit = ShizukuControl.execute(activity, "input keyevent 26")
+                        result.success(mapOf("ok" to (exit == 0), "exit" to exit, "mode" to "shizuku"))
+                    } else {
+                        result.success(mapOf("ok" to false, "exit" to -1, "mode" to "none"))
+                    }
+                    return
+                }
+            }
+
+            // ---- Accessibility backend (gestures + global actions) -------
+            if (ControlAccessibilityService.connected()) {
+                val done = when (action) {
+                    "tap" -> ControlAccessibilityService.tap(px.toFloat(), py.toFloat())
+                    "doubleTap", "double_tap", "double" -> ControlAccessibilityService.doubleTap(px.toFloat(), py.toFloat())
+                    "longPress", "long_press", "long" -> ControlAccessibilityService.longPress(px.toFloat(), py.toFloat(), duration.coerceAtLeast(700L))
+                    "swipe" -> ControlAccessibilityService.swipe(px.toFloat(), py.toFloat(), px2.toFloat(), py2.toFloat(), duration)
+                    "scroll" -> ControlAccessibilityService.swipe(
+                        (0.5 * w).toFloat(), (if (direction == "up") 0.7 else 0.3) * h,
+                        (0.5 * w).toFloat(), (if (direction == "up") 0.3 else 0.7) * h,
+                        250
+                    )
+                    "key" -> handleGlobalKey(keyCode, keyName)
+                    "text", "type" -> ControlAccessibilityService.setText(text)
+                    "clearText" -> ControlAccessibilityService.clearText()
+                    else -> ControlAccessibilityService.globalFor(action)?.let { ControlAccessibilityService.global(it) }
+                        ?: false
+                }
+                if (done) {
+                    result.success(mapOf("ok" to true, "exit" to 0, "mode" to "accessibility"))
+                    return
+                }
+            }
+
+            // ---- Shell backend (Shizuku / app process) -------------------
+            val cmd = shellCommand(action, px, py, px2, py2, duration, keyCode, keyName, text, direction)
+            if (cmd != null) {
+                val mode: String
+                val exit: Int
+                if (ShizukuControl.canControl()) {
+                    mode = "shizuku"
+                    exit = ShizukuControl.execute(activity, cmd)
+                } else {
+                    mode = "app"
+                    exit = try {
+                        val p = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+                        p.waitFor()
+                        p.exitValue()
+                    } catch (_: Exception) {
+                        -1
+                    }
+                }
+                result.success(mapOf("ok" to (exit == 0), "exit" to exit, "mode" to mode))
+                return
+            }
+
+            result.success(mapOf("ok" to false, "exit" to -2, "mode" to "none", "detail" to "No backend for action '$action'"))
+        } catch (e: Exception) {
+            result.success(mapOf("ok" to false, "exit" to -1, "mode" to "error", "detail" to e.message))
+        }
+    }
+
+    /** Map a key request onto a global action when possible. */
+    private fun handleGlobalKey(keyCode: Int?, keyName: String?): Boolean {
+        val name = keyName?.lowercase()
+        val code = keyCode ?: when (name) {
+            "home" -> 3
+            "back" -> 4
+            "recents", "appswitch", "app_switch" -> 187
+            "menu" -> 82
+            "power" -> 26
+            "search" -> 84
+            else -> -1
+        }
+        val globalAction = when (code) {
+            3 -> ControlAccessibilityService.GLOBAL_HOME
+            4 -> ControlAccessibilityService.GLOBAL_BACK
+            187 -> ControlAccessibilityService.GLOBAL_RECENTS
+            else -> null
+        }
+        return globalAction?.let { ControlAccessibilityService.global(it) } ?: false
+    }
+
+    private fun shellCommand(
+        action: String, px: Int, py: Int, px2: Int, py2: Int, duration: Long,
+        keyCode: Int?, keyName: String?, text: String, direction: String,
+    ): String? = when (action) {
+        "tap" -> "input tap $px $py"
+        "doubleTap", "double_tap", "double" -> "input tap $px $py; sleep 0.12; input tap $px $py"
+        "longPress", "long_press", "long" -> "input swipe $px $py $px $py ${duration.coerceAtLeast(700L)}"
+        "swipe" -> "input swipe $px $py $px2 $py2 $duration"
+        "scroll" -> {
+            val cx = (0.5 * activity.resources.displayMetrics.widthPixels).toInt()
+            val from = (if (direction == "up") 0.7 else 0.3) * activity.resources.displayMetrics.heightPixels
+            val to = (if (direction == "up") 0.3 else 0.7) * activity.resources.displayMetrics.heightPixels
+            "input swipe $cx ${from.toInt()} $cx ${to.toInt()} 280"
+        }
+        "key" -> when {
+            keyName != null -> "input keyevent $keyName"
+            keyCode != null -> "input keyevent $keyCode"
+            else -> null
+        }
+        "text", "type" -> "input text '${text.replace("'", "'\\''")}'"
+        "back" -> "input keyevent 4"
+        "home" -> "input keyevent 3"
+        "recents", "recent" -> "input keyevent 187"
+        "notifications", "notification_shade", "statusbar" -> "cmd statusbar expand-notifications"
+        "quick_settings", "quick", "quicksettings" -> "cmd statusbar expand-settings"
+        "lock", "lock_screen" -> "input keyevent 26"
+        else -> null
+    }
+
+    private fun launchApp(pkg: String): Map<String, Any?> {
+        if (pkg.isBlank()) return mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to "missing package")
+        return try {
+            val intent = activity.packageManager.getLaunchIntentForPackage(pkg)
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                activity.startActivity(intent)
+                mapOf("ok" to true, "exit" to 0, "mode" to "app")
+            } else if (ShizukuControl.canControl()) {
+                val exit = ShizukuControl.execute(activity, "monkey -p $pkg -c android.intent.category.LAUNCHER 1")
+                mapOf("ok" to (exit == 0), "exit" to exit, "mode" to "shizuku")
+            } else {
+                mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to "not launchable")
+            }
+        } catch (e: Exception) {
+            mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to e.message)
+        }
+    }
+
+    private fun openUrl(url: String): Map<String, Any?> {
+        if (url.isBlank()) return mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to "missing url")
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            activity.startActivity(intent)
+            mapOf("ok" to true, "exit" to 0, "mode" to "app")
+        } catch (e: Exception) {
+            mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to e.message)
+        }
+    }
+
+    private fun keepScreenOn(on: Boolean) {
+        try {
+            activity.runOnUiThread {
+                if (on) activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        } catch (_: Throwable) {}
+    }
+
+    // ---------------------------------------------------------------------
+    // Apps, audio, brightness, info
+    // ---------------------------------------------------------------------
+
+    private fun listApps(): List<Map<String, Any?>> {
+        val out = ArrayList<Map<String, Any?>>()
+        try {
+            val pm = activity.packageManager
+            val launchable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstalledApplications(0)
+            }
+            for (app in launchable) {
+                val launchIntent = pm.getLaunchIntentForPackage(app.packageName) ?: continue
+                val label = try {
+                    pm.getApplicationLabel(app).toString()
+                } catch (_: Throwable) {
+                    app.packageName
+                }
+                out.add(mapOf("package" to app.packageName, "label" to label, "launchable" to true))
+            }
+            out.sortBy { (it["label"] as? String ?: "").lowercase() }
+        } catch (_: Throwable) {}
+        return out
+    }
+
+    private fun streamId(name: String): Int = when (name.lowercase()) {
+        "music", "media" -> AudioManager.STREAM_MUSIC
+        "ring", "ringtone" -> AudioManager.STREAM_RING
+        "alarm" -> AudioManager.STREAM_ALARM
+        "notification", "notif" -> AudioManager.STREAM_NOTIFICATION
+        "system" -> AudioManager.STREAM_SYSTEM
+        "voice", "call" -> AudioManager.STREAM_VOICE_CALL
+        else -> AudioManager.STREAM_MUSIC
+    }
+
+    private fun audioManager(): AudioManager? =
+        activity.getSystemService(Service.AUDIO_SERVICE) as? AudioManager
+
+    private fun getAudio(): Map<String, Any?> {
+        val am = audioManager() ?: return mapOf("ok" to false)
+        fun snapshot(stream: Int) = mapOf(
+            "level" to am.getStreamVolume(stream),
+            "max" to am.getStreamMaxVolume(stream),
+            "muted" to (am.getStreamVolume(stream) == 0),
+        )
+        return mapOf(
+            "ok" to true,
+            "music" to snapshot(AudioManager.STREAM_MUSIC),
+            "ring" to snapshot(AudioManager.STREAM_RING),
+            "alarm" to snapshot(AudioManager.STREAM_ALARM),
+            "notification" to snapshot(AudioManager.STREAM_NOTIFICATION),
+            "system" to snapshot(AudioManager.STREAM_SYSTEM),
+        )
+    }
+
+    private fun setAudio(call: MethodCall, result: MethodChannel.Result) {
+        val r = applyAudio(
+            call.argument<String>("stream") ?: "music",
+            call.argument<Number>("level")?.toInt(),
+            call.argument<String>("op") ?: "set",
+        )
+        result.success(r)
+    }
+
+    private fun applyAudio(streamName: String, level: Int?, op: String): Map<String, Any?> {
+        val am = audioManager() ?: return mapOf("ok" to false, "detail" to "no audio manager")
+        val stream = streamId(streamName)
+        return try {
+            when (op.lowercase()) {
+                "up", "raise", "increase" -> am.adjustStreamVolume(stream, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
+                "down", "lower", "decrease" -> am.adjustStreamVolume(stream, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+                "mute" -> am.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+                "unmute" -> am.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_SHOW_UI)
+                else -> {
+                    val max = am.getStreamMaxVolume(stream)
+                    val target = (level ?: (max / 2)).coerceIn(0, max)
+                    am.setStreamVolume(stream, target, AudioManager.FLAG_SHOW_UI)
+                }
+            }
+            mapOf(
+                "ok" to true,
+                "mode" to "app",
+                "stream" to streamName,
+                "level" to am.getStreamVolume(stream),
+                "max" to am.getStreamMaxVolume(stream),
+                "muted" to (am.getStreamVolume(stream) == 0),
+            )
+        } catch (e: Exception) {
+            mapOf("ok" to false, "mode" to "app", "detail" to e.message)
+        }
+    }
+
+    private fun getBrightness(): Map<String, Any?> {
+        val system = try {
+            Settings.System.getInt(activity.contentResolver, Settings.System.SCREEN_BRIGHTNESS)
+        } catch (_: Throwable) {
+            -1
+        }
+        val window = try {
+            val attr = activity.window.attributes
+            (attr.screenBrightness * 255).toInt()
+        } catch (_: Throwable) {
+            -1
+        }
+        return mapOf("ok" to true, "system" to system, "window" to window, "max" to 255, "canWrite" to canWriteSettings())
+    }
+
+    private fun setBrightness(call: MethodCall, result: MethodChannel.Result) {
+        val level = (call.argument<Number>("level")?.toInt() ?: 128).coerceIn(0, 255)
+        // Prefer the real system brightness (shell → WRITE_SETTINGS), fall back
+        // to a window-only dim so the control always does *something*.
+        if (ShizukuControl.canControl()) {
+            val exit = ShizukuControl.execute(activity, "settings put system screen_brightness $level")
+            if (exit == 0) {
+                result.success(mapOf("ok" to true, "mode" to "shizuku", "level" to level))
+                return
+            }
+        }
+        if (canWriteSettings()) {
+            val ok = try {
+                Settings.System.putInt(activity.contentResolver, Settings.System.SCREEN_BRIGHTNESS, level)
+            } catch (_: Throwable) {
+                false
+            }
+            if (ok) {
+                result.success(mapOf("ok" to true, "mode" to "settings", "level" to level))
+                return
+            }
+        }
+        try {
+            activity.runOnUiThread {
+                val attr = activity.window.attributes
+                attr.screenBrightness = level / 255f
+                activity.window.attributes = attr
+            }
+            result.success(mapOf("ok" to true, "mode" to "window", "level" to level))
+        } catch (_: Exception) {
+            result.success(mapOf("ok" to false, "mode" to "none", "detail" to "brightness unavailable"))
+        }
+    }
+
+    private fun screenInfo(): Map<String, Any?> {
+        val metrics = activity.resources.displayMetrics
+        val rotation = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                activity.display?.rotation ?: 0
+            } else {
+                @Suppress("DEPRECATION")
+                activity.windowManager.defaultDisplay.rotation
+            }
+        } catch (_: Throwable) {
+            0
+        }
+        val version = try {
+            activity.packageManager.getPackageInfo(activity.packageName, 0).versionName
+        } catch (_: Throwable) {
+            "?"
+        }
+        return mapOf(
+            "width" to metrics.widthPixels,
+            "height" to metrics.heightPixels,
+            "density" to metrics.densityDpi,
+            "rotation" to rotation,
+            "sdk" to Build.VERSION.SDK_INT,
+            "version" to version,
+            "accessibility" to ControlAccessibilityService.connected(),
+            "shizuku" to ShizukuControl.bound(),
+        )
+    }
+
+    // ---------------------------------------------------------------------
+    // Screen capture
+    // ---------------------------------------------------------------------
 
     private fun startCapture(result: MethodChannel.Result) {
         if (started) {

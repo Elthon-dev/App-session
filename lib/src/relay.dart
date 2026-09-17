@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:vibration/vibration.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+import 'swarm.dart';
+
 enum RelayState { idle, connecting, connected, disconnected, error }
 
 enum ChatRole { user, assistant, system }
@@ -94,7 +96,14 @@ class RelayClient extends ChangeNotifier {
   ModelInfo? selectedModel;
   AgentInfo? selectedAgent;
 
+  /// Currently active swarm orchestration run (null when idle).
+  SwarmRun? swarm;
+
+  /// Previously completed swarm runs, newest first.
+  final List<SwarmRun> swarmHistory = [];
+
   bool get loaded => models.isNotEmpty || agents.isNotEmpty;
+  bool get swarmRunning => swarm != null && !(swarm!.finished);
 
   bool get connected => state == RelayState.connected;
   bool get busy => state == RelayState.connecting;
@@ -201,11 +210,146 @@ void _handle(dynamic raw) {
         case 'ping':
           sendRaw({'type': 'pong'});
           break;
+        case 'swarm-start':
+          _handleSwarmStart(j);
+          break;
+        case 'swarm-update':
+          _handleSwarmUpdate(j);
+          break;
+        case 'swarm-log':
+          _handleSwarmLog(j);
+          break;
+        case 'swarm-converge':
+          _handleSwarmConverge(j);
+          break;
+        case 'swarm-done':
+          _handleSwarmDone(j);
+          break;
         case 'control':
           _handleControl(j);
           break;
       }
     } catch (_) {}
+  }
+
+  void _handleSwarmStart(Map<String, dynamic> j) {
+    final id = j['id'] as String? ?? '';
+    final task = j['task'] as String? ?? '';
+    final rawAgents = (j['agents'] as List?) ?? const [];
+    final agents = rawAgents.whereType<Map>().map((m) {
+      return SwarmSubAgent(
+        id: m['id'] as String? ?? '',
+        name: m['name'] as String? ?? 'agent',
+        role: m['role'] as String? ?? m['name'] as String? ?? 'agent',
+        status: parseAgentStatus(m['status'] as String?),
+      );
+    }).toList();
+    final run = SwarmRun(
+      id: id.isEmpty ? 'sw${DateTime.now().millisecondsSinceEpoch}' : id,
+      task: task,
+      agents: agents,
+      startedAt: DateTime.now().millisecondsSinceEpoch,
+    );
+    swarm = run;
+    _push(ChatRole.system, '🧠 Swarm deployed — ${agents.length} sub-agents working on: $task');
+    notifyListeners();
+  }
+
+  void _handleSwarmUpdate(Map<String, dynamic> j) {
+    final run = swarm;
+    if (run == null) return;
+    final agentId = j['agentId'] as String? ?? '';
+    final agent = run.agentById(agentId);
+    if (agent == null) return;
+    final status = j['status'] as String?;
+    if (status != null) {
+      agent.status = parseAgentStatus(status);
+      if (agent.active && agent.startedAt == null) {
+        agent.startedAt = DateTime.now().millisecondsSinceEpoch;
+      }
+      if (agent.finished && agent.endedAt == null) {
+        agent.endedAt = DateTime.now().millisecondsSinceEpoch;
+      }
+    }
+    if (j['text'] != null) agent.output = j['text'] as String;
+    if (j['detail'] != null) agent.detail = j['detail'] as String;
+    if (j['progress'] is num) agent.progress = (j['progress'] as num).toDouble();
+    notifyListeners();
+  }
+
+  void _handleSwarmLog(Map<String, dynamic> j) {
+    final run = swarm;
+    if (run == null) return;
+    final agent = run.agentById(j['agentId'] as String? ?? '');
+    if (agent == null) return;
+    final line = j['line'] as String? ?? '';
+    if (line.trim().isEmpty) return;
+    agent.output = agent.output.isEmpty ? line : '${agent.output}\n$line';
+    agent.detail = line;
+    notifyListeners();
+  }
+
+  void _handleSwarmConverge(Map<String, dynamic> j) {
+    final run = swarm;
+    if (run == null) return;
+    final rawAgents = (j['agents'] as List?) ?? const [];
+    for (final m in rawAgents.whereType<Map>()) {
+      final agent = run.agentById(m['id'] as String? ?? '');
+      if (agent == null) continue;
+      if (m['output'] != null) agent.output = m['output'] as String;
+      if (m['status'] != null) agent.status = parseAgentStatus(m['status'] as String?);
+    }
+    run.summary = j['summary'] as String? ?? '';
+    run.converging = false;
+    notifyListeners();
+  }
+
+  void _handleSwarmDone(Map<String, dynamic> j) {
+    final run = swarm;
+    if (run == null) return;
+    run.endedAt = DateTime.now().millisecondsSinceEpoch;
+    if (j['summary'] != null) run.summary = j['summary'] as String;
+    if (j['status'] == 'failed') {
+      for (final a in run.agents) {
+        if (a.status == SwarmAgentStatus.pending || a.active) {
+          a.status = SwarmAgentStatus.failed;
+        }
+      }
+    }
+    swarmHistory.insert(0, run);
+    if (swarmHistory.length > 12) swarmHistory.removeRange(12, swarmHistory.length);
+    swarm = null;
+    _push(
+      ChatRole.system,
+      '✅ Swarm converged — ${run.doneCount}/${run.agents.length} agents succeeded in '
+      '${(run.elapsedMs / 1000).toStringAsFixed(1)}s.',
+    );
+    notifyListeners();
+  }
+
+  /// Ask the agent host to deploy a swarm for [task] using [spread] agent types.
+  void startSwarm(String task, List<String> spread) {
+    if (task.trim().isEmpty) return;
+    _push(ChatRole.user, '⚡ Swarm: $task');
+    sendRaw({
+      'type': 'swarm',
+      'task': task.trim(),
+      'spread': spread,
+      'model': selectedModel?.toJson(),
+    });
+  }
+
+  /// Cancel the running swarm.
+  void cancelSwarm() {
+    final run = swarm;
+    if (run == null) return;
+    sendRaw({'type': 'swarm-cancel', 'id': run.id});
+  }
+
+  /// Clear the active swarm panel.
+  void clearSwarm() {
+    swarm = null;
+    notifyListeners();
   }
 
   void _handleConfig(Map<String, dynamic> j) {

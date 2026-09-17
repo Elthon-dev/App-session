@@ -7,8 +7,10 @@ import '../sessions.dart';
 import '../theme.dart';
 import 'chat_screen.dart';
 import 'connection_screen.dart';
+import 'control_screen.dart';
 import 'screen_share_screen.dart';
 import 'session_panel.dart';
+import 'swarm_screen.dart';
 
 const kDefaultServer = 'ws://127.0.0.1:8765';
 
@@ -83,8 +85,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final ok = await _capture.executeControl(action, x, y, x2: x2, y2: y2, keyCode: keyCode, text: text);
     if (!ok) {
       final r = _capture.lastControlResult;
-      final mode = r?.$2 ?? 'unknown';
-      final exit = r?.$3 ?? -1;
+      final mode = r?.mode ?? 'unknown';
+      final exit = r?.exit ?? -1;
       final String note;
       if (exit == -2) {
         note = 'Control $action queued (engine binding) — will run when connected.';
@@ -192,8 +194,10 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 ChatScreen(
                   relay: relay,
-                  onShare: () => setState(() => _tab = 1),
+                  onShare: () => setState(() => _tab = 3),
                 ),
+                ControlScreen(relay: relay, capture: _capture),
+                SwarmScreen(relay: relay),
                 ScreenShareScreen(relay: relay, capture: _capture),
               ],
             ),
@@ -202,11 +206,22 @@ class _HomeScreenState extends State<HomeScreen> {
             selectedIndex: _tab,
             onDestinationSelected: (i) => setState(() => _tab = i),
             height: 62,
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
             destinations: const [
               NavigationDestination(
                 icon: Icon(Icons.forum_outlined),
                 selectedIcon: Icon(Icons.forum),
                 label: 'Chat',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.touch_app_outlined),
+                selectedIcon: Icon(Icons.touch_app),
+                label: 'Control',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.hub_outlined),
+                selectedIcon: Icon(Icons.hub),
+                label: 'Swarm',
               ),
               NavigationDestination(
                 icon: Icon(Icons.screen_share_outlined),
