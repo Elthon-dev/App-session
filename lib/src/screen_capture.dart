@@ -46,7 +46,7 @@ class InstalledApp {
 
   String get initial {
     final l = label.trim();
-    return l.isEmpty ? '?' : l.characters.first.toUpperCase();
+    return l.isEmpty ? '?' : String.fromCharCode(l.runes.first).toUpperCase();
   }
 }
 
