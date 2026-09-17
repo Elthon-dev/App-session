@@ -191,8 +191,9 @@ class ControlAccessibilityService : AccessibilityService() {
     private fun editableish(node: AccessibilityNodeInfo): Boolean {
         return runCatching {
             node.isEditable || node.className?.toString()?.contains("EditText") == true ||
-                node.icon == null && node.text != null && (node.viewIdResourceName?.contains("edit") == true ||
-                node.className?.toString()?.contains("Field") == true)
+                (node.text != null &&
+                    (node.viewIdResourceName?.contains("edit") == true ||
+                        node.className?.toString()?.contains("Field") == true))
         }.getOrDefault(false)
     }
 
