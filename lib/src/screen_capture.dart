@@ -87,6 +87,49 @@ class AudioState {
       );
 }
 
+/// Whole-device memory/swap snapshot for CrashGuard.
+class SystemMem {
+  const SystemMem({
+    required this.totalMB,
+    required this.availableMB,
+    required this.swapTotalMB,
+    required this.swapFreeMB,
+    required this.load1,
+    required this.uptimeS,
+    required this.shizuku,
+  });
+
+  factory SystemMem.fromJson(Map<Object?, Object?> m) => SystemMem(
+        totalMB: (m['totalMB'] as num?)?.toInt() ?? 0,
+        availableMB: (m['availableMB'] as num?)?.toInt() ?? 0,
+        swapTotalMB: (m['swapTotalMB'] as num?)?.toInt() ?? 0,
+        swapFreeMB: (m['swapFreeMB'] as num?)?.toInt() ?? 0,
+        load1: (m['load1'] as num?)?.toDouble() ?? 0,
+        uptimeS: (m['uptimeS'] as num?)?.toInt() ?? 0,
+        shizuku: m['shizuku'] == true,
+      );
+
+  final int totalMB;
+  final int availableMB;
+  final int swapTotalMB;
+  final int swapFreeMB;
+  final double load1;
+  final int uptimeS;
+
+  /// Shell (Shizuku) is available, so cache trims will actually work.
+  final bool shizuku;
+
+  int get swapUsedMB {
+    final used = swapTotalMB - swapFreeMB;
+    if (used < 0) return 0;
+    if (used > swapTotalMB) return swapTotalMB;
+    return used;
+  }
+
+  /// Low threshold: lmkd/ColorOS start killing processes around here.
+  bool get tight => totalMB > 0 && availableMB > 0 && availableMB < 450;
+}
+
 /// Talks to the native Kotlin bridge over MethodChannel: screen capture,
 /// device control, app list, audio and brightness.
 class ScreenCaptureService extends ChangeNotifier {
@@ -411,6 +454,41 @@ class ScreenCaptureService extends ChangeNotifier {
 
   /// Most recent control result.
   ControlResult? lastControlResult;
+
+  /// Most recent whole-device memory snapshot (CrashGuard).
+  SystemMem? mem;
+
+  /// Refresh the /proc memory snapshot.
+  Future<SystemMem?> refreshMem() async {
+    try {
+      final m = await _channel.invokeMethod<Map<Object?, Object?>>('getSystemMemory');
+      if (m != null) {
+        mem = SystemMem.fromJson(m);
+        notifyListeners();
+      }
+    } catch (_) {}
+    return mem;
+  }
+
+  /// Ask the shell (Shizuku) to free app caches to relieve memory pressure.
+  Future<ControlResult> trimCaches() async {
+    try {
+      return ControlResult.from(await _channel.invokeMethod<dynamic>('trimCaches'));
+    } catch (e) {
+      return ControlResult(ok: false, mode: 'error', detail: '$e');
+    }
+  }
+
+  /// Cap retained background processes so the OS keeps a larger free pool.
+  Future<ControlResult> applyMemoryTweaks({int maxCached = 8}) async {
+    try {
+      return ControlResult.from(
+        await _channel.invokeMethod<dynamic>('applyMemoryTweaks', {'maxCached': maxCached}),
+      );
+    } catch (e) {
+      return ControlResult(ok: false, mode: 'error', detail: '$e');
+    }
+  }
 
   Future<bool> start() async {
     try {

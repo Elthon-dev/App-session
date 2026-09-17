@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -161,6 +162,8 @@ class _ControlScreenState extends State<ControlScreen> with WidgetsBindingObserv
               _brightnessCard(capture),
               const SizedBox(height: 14),
               _urlCard(capture),
+              const SizedBox(height: 14),
+              _CrashGuardCard(capture: capture),
             ],
           ),
         ),
@@ -1093,6 +1096,173 @@ class _PermissionRow extends StatelessWidget {
             ),
             child: Text(granted ? 'Granted' : actionLabel),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// CrashGuard: watches whole-device memory and — when it can — frees memory
+/// *before* lmkd/ColorOS kill Termux, plus one-tap cache trim + tweaks.
+class _CrashGuardCard extends StatefulWidget {
+  const _CrashGuardCard({required this.capture});
+
+  final ScreenCaptureService capture;
+
+  @override
+  State<_CrashGuardCard> createState() => _CrashGuardCardState();
+}
+
+class _CrashGuardCardState extends State<_CrashGuardCard> {
+  Timer? _guardTimer;
+  bool _auto = false;
+  bool _busy = false;
+  String? _lastResult;
+
+  ScreenCaptureService get c => widget.capture;
+
+  @override
+  void initState() {
+    super.initState();
+    c.addListener(_onChanged);
+    c.refreshMem();
+  }
+
+  @override
+  void dispose() {
+    c.removeListener(_onChanged);
+    _guardTimer?.cancel();
+    super.dispose();
+  }
+
+  void _onChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _setAuto(bool v) {
+    setState(() => _auto = v);
+    if (v) {
+      c.refreshMem();
+      _guardTimer?.cancel();
+      _guardTimer = Timer.periodic(const Duration(seconds: 10), (_) => _autoTick());
+    } else {
+      _guardTimer?.cancel();
+      _guardTimer = null;
+    }
+  }
+
+  Future<void> _autoTick() async {
+    final m = await c.refreshMem();
+    if (!mounted || m == null) return;
+    if (!m.tight) {
+      setState(() {});
+      return;
+    }
+    final res = await c.trimCaches();
+    if (!mounted) return;
+    setState(() {
+      _lastResult = res.ok
+          ? 'Automatic trim: freed caches (${m.availableMB}MB avail)'
+          : 'Tight (${m.availableMB}MB) → trim failed: ${res.detail ?? res.mode}';
+    });
+    if (!res.ok && res.mode == 'none') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Grant Shizuku so CrashGuard can free memory automatically.'),
+          backgroundColor: Nord.surface,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _run(Future<ControlResult> Function() action, String done) async {
+    setState(() => _busy = true);
+    final res = await action();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _lastResult = res.ok ? done : 'Failed: ${res.detail ?? res.mode ?? 'unknown'}';
+    });
+    if (!res.ok && res.mode == 'none') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Needs Shizuku (shell) authorization — open Shizuku and grant OpenBridge.'),
+          backgroundColor: Nord.surface,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = c.mem;
+    final swapUsed = m?.swapUsedMB ?? 0;
+    final pressure = m == null || m.tight;
+    final tone = m == null ? Nord.muted : (m.tight ? Nord.error : Nord.success);
+
+    return _Card(
+      title: 'CrashGuard',
+      icon: Icons.health_and_safety_outlined,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Auto-guard', style: TextStyle(fontSize: 11, color: Nord.muted)),
+          Switch(
+            value: _auto,
+            onChanged: _setAuto,
+            activeThumbColor: Nord.accent,
+            activeTrackColor: Nord.accent.withValues(alpha: 0.35),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            m == null
+                ? 'Reading system memory…'
+                : 'RAM ${m.availableMB}/${m.totalMB} MB avail · swap $swapUsed/${m.swapTotalMB} MB · load ${m.load1.toStringAsFixed(1)}',
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: tone),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Termux is killed when the whole phone runs out of memory. ${_auto ? 'Watching now — auto-trims caches if RAM drops below 450MB.' : 'Auto-guard trims system caches before Android kills us; Low-RAM tweaks cap background processes to keep a free pool.'}',
+            style: const TextStyle(fontSize: 10.5, color: Nord.muted, height: 1.4),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _DeckButton(
+                label: 'Trim caches',
+                icon: Icons.cleaning_services_outlined,
+                accent: true,
+                onTap: _busy ? () {} : () => _run(c.trimCaches, 'Cache trim done.'),
+              ),
+              _DeckButton(
+                label: 'Low-RAM tweaks',
+                icon: Icons.settings_suggest_outlined,
+                onTap: _busy ? () {} : () => _run(c.applyMemoryTweaks(), 'max_cached_processes capped at 8.'),
+              ),
+              _DeckButton(
+                label: 'Refresh',
+                icon: Icons.refresh,
+                onTap: _busy ? () {} : () {
+                  c.refreshMem();
+                  setState(() {});
+                },
+              ),
+            ],
+          ),
+          if (_lastResult != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _lastResult!,
+              style: TextStyle(fontSize: 10.5, color: pressure ? Nord.warning : Nord.muted),
+            ),
+          ],
         ],
       ),
     );

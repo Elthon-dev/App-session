@@ -273,6 +273,42 @@ class ScreenCaptureChannel(
             "getBrightness" -> result.success(getBrightness())
             "setBrightness" -> setBrightness(call, result)
             "screenInfo" -> result.success(screenInfo())
+            "getSystemMemory" -> result.success(systemMemory())
+            "trimCaches" -> {
+                val exit = if (ShizukuControl.canControl()) {
+                    ShizukuControl.execute(activity, "pm trim-caches 1T")
+                } else {
+                    -2
+                }
+                result.success(
+                    mapOf(
+                        "ok" to (exit == 0),
+                        "exit" to exit,
+                        "mode" to if (exit == -2) "none" else "shizuku",
+                        "detail" to if (exit == -2) "Needs Shizuku (shell) to free app caches" else null,
+                    )
+                )
+            }
+            "applyMemoryTweaks" -> {
+                val maxCached = (call.argument<Number>("maxCached")?.toInt() ?: 8).coerceIn(0, 32)
+                val exit = if (ShizukuControl.canControl()) {
+                    ShizukuControl.execute(
+                        activity,
+                        "settings put global activity_manager_constants max_cached_processes $maxCached"
+                    )
+                } else {
+                    -2
+                }
+                result.success(
+                    mapOf(
+                        "ok" to (exit == 0),
+                        "exit" to exit,
+                        "mode" to if (exit == -2) "none" else "shizuku",
+                        "maxCached" to maxCached,
+                        "detail" to if (exit == -2) "Needs Shizuku (shell) to apply this" else null,
+                    )
+                )
+            }
             else -> result.notImplemented()
         }
     }
@@ -653,6 +689,43 @@ class ScreenCaptureChannel(
             "version" to version,
             "accessibility" to ControlAccessibilityService.connected(),
             "shizuku" to ShizukuControl.bound(),
+        )
+    }
+
+    /**
+     * Whole-device memory/swap snapshot read straight from /proc (world
+     * readable), plus one-shot load. CrashGuard uses this to predict when
+     * lmkd/ColorOS is about to kill Termux and trim caches first.
+     */
+    private fun systemMemory(): Map<String, Any?> {
+        fun meminfoKb(): Map<String, Long> {
+            val m = mutableMapOf<String, Long>()
+            try {
+                java.io.File("/proc/meminfo").readLines().forEach { line ->
+                    val parts = line.split(":")
+                    if (parts.size >= 2) {
+                        val v = parts[1].trim().split(" ")[0].toLongOrNull()
+                        if (v != null) m[parts[0]] = v
+                    }
+                }
+            } catch (_: Throwable) {}
+            return m
+        }
+        val kb = meminfoKb()
+        val load1 = try {
+            java.io.File("/proc/loadavg").readText().trim().split(" ")[0].toDoubleOrNull() ?: -1.0
+        } catch (_: Throwable) { -1.0 }
+        val uptimeS = try {
+            java.io.File("/proc/uptime").readText().trim().split(" ")[0].toDoubleOrNull()?.toLong() ?: -1L
+        } catch (_: Throwable) { -1L }
+        return mapOf(
+            "totalMB" to ((kb["MemTotal"] ?: 0L) / 1024L),
+            "availableMB" to ((kb["MemAvailable"] ?: 0L) / 1024L),
+            "swapTotalMB" to ((kb["SwapTotal"] ?: 0L) / 1024L),
+            "swapFreeMB" to ((kb["SwapFree"] ?: 0L) / 1024L),
+            "load1" to load1,
+            "uptimeS" to uptimeS,
+            "shizuku" to ShizukuControl.canControl(),
         )
     }
 
