@@ -2,6 +2,9 @@ package com.elthondev.openbridge
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
@@ -160,13 +163,81 @@ class ControlAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * The best editable node for text entry: the input-focused node if one
+     * exists, otherwise the first editable text box in the active window.
+     * Compose apps sometimes report their input fields without INPUT focus,
+     * so we walk the tree rather than giving up.
+     */
+    private fun editableNode(): AccessibilityNodeInfo? {
+        val focused = focusedNode()
+        if (focused != null && editableish(focused)) return focused
+        val root = try { rootInActiveWindow } catch (_: Throwable) { null } ?: return focused
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (editableish(node)) return node
+            for (i in 0 until node.childCount) {
+                try {
+                    val child = node.getChild(i) ?: continue
+                    queue.addLast(child)
+                } catch (_: Throwable) {}
+            }
+        }
+        return focused
+    }
+
+    private fun editableish(node: AccessibilityNodeInfo): Boolean {
+        return runCatching {
+            node.isEditable || node.className?.toString()?.contains("EditText") == true ||
+                node.icon == null && node.text != null && (node.viewIdResourceName?.contains("edit") == true ||
+                node.className?.toString()?.contains("Field") == true)
+        }.getOrDefault(false)
+    }
+
+    /** Text currently in the given node, normalized for comparison. */
+    private fun safeText(node: AccessibilityNodeInfo?): String? {
+        return try { node?.text?.toString().orEmpty().replace("\n", " ") }
+            catch (_: Throwable) { null }
+    }
+
+    /**
+     * Multi-strategy text entry: focus -> SET_TEXT -> verify -> clipboard
+     * paste. Compose fields (ChatGPT etc.) often ignore ACTION_SET_TEXT but do
+     * accept a paste, so we fall through rather than fail.
+     */
     private fun setText(text: String): Boolean {
         return try {
-            val focused = focusedNode() ?: return false
-            val args = Bundle().apply {
-                putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+            val node = editableNode() ?: return false
+            try {
+                if (!node.isFocused) node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            } catch (_: Throwable) {}
+
+            val want = text.replace("\n", " ")
+            val setOk = node.performAction(
+                AccessibilityNodeInfo.ACTION_SET_TEXT,
+                Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
+                },
+            )
+            if (text.isEmpty()) return true
+            if (setOk) {
+                if (safeText(node)?.contains(want) == true) return true
+                Thread.sleep(120)
+                if (safeText(node)?.contains(want) == true) return true
             }
-            focused.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+
+            // Clipboard + paste fallback (message boxes & Compose inputs).
+            try {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("openbridge", text))
+                node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            } catch (e: Throwable) {
+                Log.e(TAG, "paste fallback failed: $e")
+            }
+            Thread.sleep(150)
+            safeText(node)?.contains(want) == true
         } catch (e: Throwable) {
             Log.e(TAG, "setText failed: $e")
             false
