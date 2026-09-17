@@ -1239,12 +1239,12 @@ class _CrashGuardCardState extends State<_CrashGuardCard> {
                 label: 'Trim caches',
                 icon: Icons.cleaning_services_outlined,
                 accent: true,
-                onTap: _busy ? () {} : () => _run(c.trimCaches, 'Cache trim done.'),
+                onTap: _busy ? () {} : () => _run(() => c.trimCaches(), 'Cache trim done.'),
               ),
               _DeckButton(
                 label: 'Low-RAM tweaks',
                 icon: Icons.settings_suggest_outlined,
-                onTap: _busy ? () {} : () => _run(c.applyMemoryTweaks(), 'max_cached_processes capped at 8.'),
+                onTap: _busy ? () {} : () => _run(() => c.applyMemoryTweaks(), 'max_cached_processes capped at 8.'),
               ),
               _DeckButton(
                 label: 'Refresh',
