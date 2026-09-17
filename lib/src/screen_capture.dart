@@ -173,6 +173,10 @@ class ScreenCaptureService extends ChangeNotifier {
   /// Android WRITE_SETTINGS granted (needed for system brightness).
   bool writeSettings = false;
 
+  /// "Display over other apps" granted — lets OpenBridge launch apps from the
+  /// background without Shizuku.
+  bool overlayAllowed = false;
+
   /// OpenBridge AccessibilityService is enabled (no-Shizuku control backend).
   bool accessibilityEnabled = false;
 
@@ -244,6 +248,7 @@ class ScreenCaptureService extends ChangeNotifier {
       shizukuBound = m?['shizukuBound'] == true;
       accessibilityEnabled = m?['accessibility'] == true;
       writeSettings = m?['writeSettings'] == true;
+      overlayAllowed = m?['overlay'] == true;
       notifyListeners();
     } catch (_) {}
   }
@@ -282,6 +287,18 @@ class ScreenCaptureService extends ChangeNotifier {
   Future<bool> openWriteSettings() async {
     try {
       final ok = await _channel.invokeMethod<bool>('openWriteSettings');
+      return ok == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Open the "Display over other apps" grant screen so OpenBridge can launch
+  /// other apps from the background without Shizuku.
+  Future<bool> requestOverlayPermission() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('requestOverlayPermission');
+      await refreshPermissions();
       return ok == true;
     } catch (_) {
       return false;
@@ -335,6 +352,12 @@ class ScreenCaptureService extends ChangeNotifier {
     double? y2,
     int? keyCode,
     String? text,
+    String? package,
+    String? url,
+    int? duration,
+    String? direction,
+    String? stream,
+    int? level,
   }) async {
     final res = await control(action, params: {
       'x': x,
@@ -343,6 +366,12 @@ class ScreenCaptureService extends ChangeNotifier {
       if (y2 != null) 'y2': y2,
       if (keyCode != null) 'keyCode': keyCode,
       if (text != null) 'text': text,
+      if (package != null) 'package': package,
+      if (url != null) 'url': url,
+      if (duration != null) 'duration': duration,
+      if (direction != null) 'direction': direction,
+      if (stream != null) 'stream': stream,
+      if (level != null) 'level': level,
     });
     return res.ok;
   }

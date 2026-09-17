@@ -82,13 +82,31 @@ class _HomeScreenState extends State<HomeScreen> {
     final y2 = (raw['y2'] as num?)?.toDouble();
     final keyCode = raw['keyCode'] as int?;
     final text = raw['text'] as String?;
-    final ok = await _capture.executeControl(action, x, y, x2: x2, y2: y2, keyCode: keyCode, text: text);
+    final package = raw['package'] as String?;
+    final url = raw['url'] as String?;
+    final duration = (raw['duration'] as num?)?.toInt();
+    final direction = raw['direction'] as String?;
+    final stream = raw['stream'] as String?;
+    final level = (raw['level'] as num?)?.toInt();
+    final ok = await _capture.executeControl(action, x, y,
+        x2: x2,
+        y2: y2,
+        keyCode: keyCode,
+        text: text,
+        package: package,
+        url: url,
+        duration: duration,
+        direction: direction,
+        stream: stream,
+        level: level);
     if (!ok) {
       final r = _capture.lastControlResult;
       final mode = r?.mode ?? 'unknown';
       final exit = r?.exit ?? -1;
       final String note;
-      if (exit == -2) {
+      if (r?.detail != null && r!.detail!.isNotEmpty) {
+        note = 'Control $action failed: ${r.detail}';
+      } else if (exit == -2) {
         note = 'Control $action queued (engine binding) — will run when connected.';
       } else if (exit == -1) {
         note = 'Control $action blocked: Shizuku permission needed.';

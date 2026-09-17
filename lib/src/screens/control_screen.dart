@@ -1011,6 +1011,16 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
               onAction: _busy ? null : () => _run(c.openWriteSettings),
             ),
             _PermissionRow(
+              icon: Icons.picture_in_picture_alt_outlined,
+              title: 'Launch apps',
+              subtitle: c.overlayAllowed
+                  ? '"Display over other apps" granted — apps can be launched even in the background.'
+                  : 'Grant "Display over other apps" so OpenBridge can launch apps without Shizuku.',
+              granted: c.overlayAllowed,
+              actionLabel: 'Grant',
+              onAction: _busy ? null : () => _run(c.requestOverlayPermission),
+            ),
+            _PermissionRow(
               icon: Icons.notifications_none,
               title: 'Notifications',
               subtitle: 'Shows the capture status in the notification shade.',

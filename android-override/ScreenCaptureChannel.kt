@@ -226,8 +226,32 @@ class ScreenCaptureChannel(
                         "shizukuBound" to ShizukuControl.bound(),
                         "accessibility" to ControlAccessibilityService.connected(),
                         "writeSettings" to canWriteSettings(),
+                        "overlay" to Settings.canDrawOverlays(activity),
                     )
                 )
+            }
+            "overlayStatus" -> {
+                result.success(mapOf("overlay" to Settings.canDrawOverlays(activity)))
+            }
+            "requestOverlayPermission" -> {
+                val granted = Settings.canDrawOverlays(activity)
+                if (!granted) {
+                    try {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${activity.packageName}")
+                        )
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        activity.startActivity(intent)
+                    } catch (_: Exception) {
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            activity.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                }
+                result.success(granted)
             }
             "requestNotificationPermission" -> {
                 if (!notificationGranted() && Build.VERSION.SDK_INT >= 33) {
@@ -483,15 +507,35 @@ class ScreenCaptureChannel(
         if (pkg.isBlank()) return mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to "missing package")
         return try {
             val intent = activity.packageManager.getLaunchIntentForPackage(pkg)
-            if (intent != null) {
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                activity.startActivity(intent)
-                mapOf("ok" to true, "exit" to 0, "mode" to "app")
-            } else if (ShizukuControl.canControl()) {
-                val exit = ShizukuControl.execute(activity, "monkey -p $pkg -c android.intent.category.LAUNCHER 1")
-                mapOf("ok" to (exit == 0), "exit" to exit, "mode" to "shizuku")
+            if (intent == null) {
+                // Maybe not a launcher activity but still installable — try Shizuku once.
+                if (ShizukuControl.canControl()) {
+                    val exit = ShizukuControl.execute(activity, "monkey -p $pkg -c android.intent.category.LAUNCHER 1")
+                    mapOf("ok" to (exit == 0), "exit" to exit, "mode" to "shizuku")
+                } else {
+                    mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to "app not installed: $pkg")
+                }
             } else {
-                mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to "not launchable")
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                try {
+                    activity.startActivity(intent)
+                    mapOf("ok" to true, "exit" to 0, "mode" to "app")
+                } catch (e: SecurityException) {
+                    if (ShizukuControl.canControl()) {
+                        val exit = ShizukuControl.execute(activity, "monkey -p $pkg -c android.intent.category.LAUNCHER 1")
+                        mapOf("ok" to (exit == 0), "exit" to exit, "mode" to "shizuku")
+                    } else if (Settings.canDrawOverlays(activity)) {
+                        mapOf(
+                            "ok" to false, "exit" to -1, "mode" to "app",
+                            "detail" to "background launch refused despite overlay: ${e.message}",
+                        )
+                    } else {
+                        mapOf(
+                            "ok" to false, "exit" to -1, "mode" to "app",
+                            "detail" to "grant Display over other apps (overlay) so OpenBridge can launch apps behind the scenes",
+                        )
+                    }
+                }
             }
         } catch (e: Exception) {
             mapOf("ok" to false, "exit" to -1, "mode" to "app", "detail" to e.message)
