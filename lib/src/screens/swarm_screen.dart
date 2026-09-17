@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../relay.dart';
 import '../swarm.dart';
@@ -344,6 +345,7 @@ class _RunView extends StatelessWidget {
           const SizedBox(height: 4),
           _ConvergeCard(run: run),
         ],
+        _CombinedOutputCard(run: run),
       ],
     );
   }
@@ -569,6 +571,102 @@ class _ConvergeCard extends StatelessWidget {
             Text(summary, style: const TextStyle(fontSize: 13, height: 1.5, color: Nord.text2)),
         ],
       ),
+    );
+  }
+}
+
+/// All sub-agent outputs and the converged result flattened into one
+/// copyable transcript, so the whole swarm's work can be lifted in one tap.
+class _CombinedOutputCard extends StatefulWidget {
+  const _CombinedOutputCard({required this.run});
+
+  final SwarmRun run;
+
+  @override
+  State<_CombinedOutputCard> createState() => _CombinedOutputCardState();
+}
+
+class _CombinedOutputCardState extends State<_CombinedOutputCard> {
+  late String _text;
+
+  @override
+  void didUpdateWidget(covariant _CombinedOutputCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.run.id != widget.run.id) _text = widget.run.combinedOutput;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final run = widget.run;
+    _text = run.combinedOutput;
+    final hasContent = run.agents.any((a) => a.output.trim().isNotEmpty) ||
+        (run.summary != null && run.summary!.trim().isNotEmpty);
+
+    return Padding(
+      padding: EdgeInsets.only(top: hasContent ? 14 : 0),
+      child: hasContent
+          ? Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+              decoration: BoxDecoration(
+                color: Nord.surface,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Nord.info.withValues(alpha: 0.35), width: 0.8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.paste_outlined, size: 16, color: Nord.info),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Combined output',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Nord.text1),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${run.agents.length} agents',
+                        style: const TextStyle(fontSize: 10.5, color: Nord.muted),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: _text));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: const Text('Combined output copied to clipboard.'),
+                              backgroundColor: Nord.surface,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.copy, size: 17, color: Nord.accent),
+                        tooltip: 'Copy combined output',
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Nord.bg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Nord.border, width: 0.5),
+                    ),
+                    child: SingleChildScrollView(
+                      child: SelectableText(
+                        _text,
+                        style: const TextStyle(fontSize: 11.5, height: 1.45, color: Nord.text2),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : const SizedBox.shrink(),
     );
   }
 }

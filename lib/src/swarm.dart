@@ -135,4 +135,26 @@ class SwarmRun {
     }
     return null;
   }
+
+  /// Every sub-agent's final output plus the converged result, flattened into
+  /// one copyable transcript.
+  String get combinedOutput {
+    final buf = StringBuffer();
+    buf.writeln('Master task: $task');
+    buf.writeln('${'─' * 48}');
+    for (final a in agents) {
+      buf.writeln('');
+      buf.writeln('## ${a.name} (${a.role}) — ${agentStatusLabel(a.status)}');
+      buf.writeln(a.output.trim().isEmpty ? '(no output)' : a.output.trim());
+    }
+    final summary = this.summary;
+    if (summary != null && summary.trim().isNotEmpty) {
+      buf.writeln('');
+      buf.writeln('${'─' * 48}');
+      buf.writeln('');
+      buf.writeln('## Converged result');
+      buf.writeln(summary.trim());
+    }
+    return buf.toString();
+  }
 }
